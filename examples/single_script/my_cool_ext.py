@@ -2,23 +2,23 @@
 # requires-python = ">=3.12"
 # dependencies = ["requests", "numpy"]
 #
-# [tool.pyext]
+# [tool.pyodex]
 # name = "My Cool Ext"
 # version = "0.1.0"
-# description = "Single-file Python Chrome extension built with shyft_ext_bundle.py."
+# description = "Single-file Python Chrome extension built with pyodex_bundle.py."
 # matches = ["<all_urls>"]
 # url_filter = "shyft"
 # overlay_css = "#cool-panel { top: 60px; left: 16px; max-width: 320px; }"
 # ///
 """Single-script extension. Build + zip with:
 
-    uv run shyft_ext_bundle.py examples/single_script/my_cool_ext.py
+    uv run pyodex_bundle.py examples/single_script/my_cool_ext.py
 """
 
 import numpy as np
 import requests
 
-from pyext_runtime import Overlay, on, status
+from pyodex_runtime import Overlay, on, status
 
 ui = Overlay()
 btn = ui.button("Compute 🧮", top=16, left=16)

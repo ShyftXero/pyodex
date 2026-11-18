@@ -8,7 +8,7 @@ Demonstrates:
 
 import asyncio
 
-from pyext_runtime import Overlay, TcpSocket, document, jsobj, on, status, vendored
+from pyodex_runtime import Overlay, TcpSocket, document, jsobj, on, status, vendored
 
 ui = Overlay()
 container = document.getElementById("fireworks-container")

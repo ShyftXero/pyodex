@@ -1,15 +1,15 @@
-# pyext — Python Chrome extensions on Pyodide
+# pyodex — Python Chrome extensions on Pyodide
 
-Write a Chrome (Manifest V3) extension in Python. `pyext` scaffolds the project,
+Write a Chrome (Manifest V3) extension in Python. `pyodex` scaffolds the project,
 bundles a local Pyodide runtime, resolves your Python dependencies for the
 wasm32 target, and emits a loadable unpacked extension.
 
 ## Fastest path: one script
 
-Write a PEP 723 script with a `[tool.pyext]` block, then:
+Write a PEP 723 script with a `[tool.pyodex]` block, then:
 
 ```
-uv run shyft_ext_bundle.py my_cool_ext.py
+uv run pyodex_bundle.py my_cool_ext.py
 ```
 
 That resolves deps for wasm32, bundles Pyodide, and writes
@@ -20,12 +20,12 @@ That resolves deps for wasm32, bundles Pyodide, and writes
 # /// script
 # dependencies = ["requests", "numpy"]
 #
-# [tool.pyext]
+# [tool.pyodex]
 # name = "My Cool Ext"
 # matches = ["<all_urls>"]
 # url_filter = "shyft"
 # overlay_css = "#p { top: 60px }"
-# [tool.pyext.vendor]
+# [tool.pyodex.vendor]
 # "lib.js" = "https://cdn.jsdelivr.net/npm/some-lib/dist/index.umd.js"
 # ///
 ```
@@ -36,9 +36,9 @@ Flags: `--out DIR`, `--no-zip`, `--refresh-lock`.
 
 ```
 uv sync
-uv run pyext init myext --match "*://*.example.com/*"
-uv run pyext build myext        # -> myext/dist/myext/
-uv run pyext zip myext          # -> myext/dist/myext.zip
+uv run pyodex init myext --match "*://*.example.com/*"
+uv run pyodex build myext        # -> myext/dist/myext/
+uv run pyodex zip myext          # -> myext/dist/myext.zip
 ```
 
 Load `dist/<slug>/` via `chrome://extensions` → Developer mode → Load unpacked.
@@ -47,11 +47,11 @@ Load `dist/<slug>/` via `chrome://extensions` → Developer mode → Load unpack
 
 ```
 myext/
-├── pyext.toml          # name, version, matches, url_filter, scripts, vendor, ...
+├── pyodex.toml          # name, version, matches, url_filter, scripts, vendor, ...
 ├── main.py             # entry point, runs inside Pyodide (PEP 723 deps supported)
 ├── overlay.css         # optional styles for the overlay page
 ├── overlay.body.html   # optional markup injected into the overlay <body>
-└── pyext.lock          # generated: pinned wasm32 wheel versions
+└── pyodex.lock          # generated: pinned wasm32 wheel versions
 ```
 
 ## How it runs
@@ -60,7 +60,7 @@ myext/
    the page pointing at `overlay.html`.
 2. `bootstrap.js` loads Pyodide from the extension's own `pyodide/` folder,
    unpacks bundled wheels into site-packages, patches `urllib`, then runs `main.py`.
-3. `pyext_runtime` (importable from `main.py`) gives you `Overlay`, `on`, `el`,
+3. `pyodex_runtime` (importable from `main.py`) gives you `Overlay`, `on`, `el`,
    `Page` (talk to host page), `WebSocketClient`, `TcpSocket`, `fetch_json`, `vendored`.
 
 ## Dependencies (PEP 723)
@@ -73,18 +73,18 @@ Declare packages inline in `main.py`:
 # ///
 ```
 
-On build, `pyext`:
+On build, `pyodex`:
 
 - resolves with `uv pip compile --python-platform wasm32-pyodide2025`, so only
   wheels that run in Pyodide are accepted (`py3-none-any` or `pyodide_2025_0_wasm32`);
-- pins results in `pyext.lock`, reused until the dependency list changes;
+- pins results in `pyodex.lock`, reused until the dependency list changes;
 - downloads each wheel once into a global read-only store
-  (`~/.cache/pyext/store/<name>/<version>/`, files `0444`), preferring Pyodide's
+  (`~/.cache/pyodex/store/<name>/<version>/`, files `0444`), preferring Pyodide's
   own CDN build when the version matches, else PyPI with sha256 check;
 - links wheels into `dist/wheels/` copy-on-write: reflink where the filesystem
   supports it, else hardlink (store file is read-only, so writes fail), else copy.
 
-`pyext.toml` `pyodide_packages = [...]` adds extra requirements the same way.
+`pyodex.toml` `pyodide_packages = [...]` adds extra requirements the same way.
 Packages Pyodide ships itself (numpy, pandas, cryptography, ...) are pinned to
 Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 
@@ -93,13 +93,13 @@ Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 Like haru-pack's thick-app checks: a package is **good** only if a functional
 probe passed inside Pyodide under Node, **bad** if resolve/fetch/import/probe
 failed, **import-only** if it imports but has no probe. Shipped results live in
-`src/pyext/compat.json`; local runs append to `~/.cache/pyext/compat.json`.
+`src/pyodex/compat.json`; local runs append to `~/.cache/pyodex/compat.json`.
 Builds refuse known-bad packages unless `--allow-bad`.
 
 ```
-uv run pyext compat test requests numpy redis
-uv run pyext compat test --top 50 --shipped
-uv run pyext compat list --filter bad
+uv run pyodex compat test requests numpy redis
+uv run pyodex compat test --top 50 --shipped
+uv run pyodex compat list --filter bad
 ```
 
 Top-50 PyPI as of 2026-11: 45 good, 4 import-only, 1 bad (uvicorn: no
@@ -112,11 +112,11 @@ those protocols. Add probes in `compat.py` `PROBES`.
 `http = true` (default) bundles `requests`, `urllib3`, `pyodide-http` and friends.
 `requests` works unmodified (urllib3 ≥ 2.2 has a native Emscripten backend).
 `urllib.request` is patched by `pyodide-http` at boot. For async use
-`pyext_runtime.fetch_json` / `pyodide.http.pyfetch`.
+`pyodex_runtime.fetch_json` / `pyodide.http.pyfetch`.
 
 `host_permissions` (default `<all_urls>`) controls which origins the overlay may fetch.
 
-## Natural Python (`pyext_natural`)
+## Natural Python (`pyodex_natural`)
 
 Installed before `main.py` runs (`natural = true`, default). Each shim gates on
 a detected capability and leaves stdlib alone if unsupported.
@@ -128,25 +128,25 @@ a detected capability and leaves stdlib alone if unsupported.
 - **input() / getpass**: `window.prompt`. **webbrowser.open**: `window.open`.
 - **time.sleep**: yields to event loop instead of spinning.
 - **persistent cwd**: `/home/pyodide/data` on IndexedDB. `open('x','w')`
-  survives reload. `pyext_natural.save()` or `with persist():` flushes.
+  survives reload. `pyodex_natural.save()` or `with persist():` flushes.
   Autosave every 2 s.
 - **pip_install("pkg")**: micropip at runtime (bundled).
 - **print**: mirrored to the browser console as `[py] ...`.
 
 ```python
-import pyext_natural
-pyext_natural.config.proxy = "ws://127.0.0.1:1234"
+import pyodex_natural
+pyodex_natural.config.proxy = "ws://127.0.0.1:1234"
 ```
 
-Capabilities detected at boot land on `window.pyextCaps` (DevTools).
+Capabilities detected at boot land on `window.pyodexCaps` (DevTools).
 
 ## Pyodide capability snapshots
 
 ```
-uv run pyext pyodide probe               # runs detect() in Node, saves src/pyext/capabilities/<ver>.json
-uv run pyext pyodide latest              # newest GitHub release tag
-uv run pyext pyodide probe --version 315.0.0
-uv run pyext pyodide diff 314.0.8 315.0.0
+uv run pyodex pyodide probe               # runs detect() in Node, saves src/pyodex/capabilities/<ver>.json
+uv run pyodex pyodide latest              # newest GitHub release tag
+uv run pyodex pyodide probe --version 315.0.0
+uv run pyodex pyodide diff 314.0.8 315.0.0
 ```
 
 Snapshot holds: JSPI, FS types, ffi surface, JS API keys, stdlib gaps, every
@@ -164,7 +164,7 @@ uv run proxy/python_websocket_proxy.py --port 1234 --allow localhost:*
 Then in the extension:
 
 ```python
-from pyext_runtime import TcpSocket
+from pyodex_runtime import TcpSocket
 sock = await TcpSocket.connect("localhost", 6379)
 sock.send(b"PING\r\n")
 print(await sock.recv_until(b"\n"))
@@ -189,18 +189,18 @@ bash proxy/build_binaries.sh linux-aarch64   # explicit targets
 type `launch` / `stop`).
 
 ```
-uv run pyext build examples/fireworks
+uv run pyodex build examples/fireworks
 ```
 
 ## CLI
 
 ```
-pyext init <dir> [--name N] [--match PATTERN ...]
-pyext build <dir> [--out DIR]
-pyext zip <dir> [--out FILE]
-pyext fetch [--pyodide-version V] [--force]
-pyext compat test|list [PKG ...] [--top N] [--shipped] [--filter STATUS]
-pyext pyodide probe|latest|diff [--version V] [OLD NEW]
+pyodex init <dir> [--name N] [--match PATTERN ...]
+pyodex build <dir> [--out DIR]
+pyodex zip <dir> [--out FILE]
+pyodex fetch [--pyodide-version V] [--force]
+pyodex compat test|list [PKG ...] [--top N] [--shipped] [--filter STATUS]
+pyodex pyodide probe|latest|diff [--version V] [OLD NEW]
 ```
 
-Cache location: `$PYEXT_CACHE` or `~/.cache/pyext`.
+Cache location: `$PYODEX_CACHE` or `~/.cache/pyodex`.

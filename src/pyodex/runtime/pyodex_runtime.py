@@ -1,6 +1,6 @@
-"""pyext_runtime: small helpers for Python code running inside the overlay iframe.
+"""pyodex_runtime: small helpers for Python code running inside the overlay iframe.
 
-Importable from app code as `from pyext_runtime import ...`. Only depends on
+Importable from app code as `from pyodex_runtime import ...`. Only depends on
 Pyodide's `js` and `pyodide.ffi`.
 """
 
@@ -64,7 +64,7 @@ def _camel(s: str) -> str:
 
 def status(text: str | None, error: bool = False) -> None:
     """Show/hide the built-in bottom-right status pill. `None` hides it."""
-    s = document.getElementById("pyext-status")
+    s = document.getElementById("pyodex-status")
     if not s:
         return
     if text is None:
@@ -125,7 +125,7 @@ class Page:
     def _on_message(self, ev: Any) -> None:
         data = ev.data
         try:
-            if not data or not data.pyext:
+            if not data or not data.pyodex:
                 return
         except AttributeError:
             return
@@ -138,7 +138,7 @@ class Page:
         fut = asyncio.get_event_loop().create_future() if want_reply else None
         if fut is not None:
             self._pending[self._next] = fut
-        window.parent.postMessage(jsobj({"pyext": True, "type": type_, "id": self._next, "payload": payload}), "*")
+        window.parent.postMessage(jsobj({"pyodex": True, "type": type_, "id": self._next, "payload": payload}), "*")
         return fut
 
     async def info(self) -> dict:

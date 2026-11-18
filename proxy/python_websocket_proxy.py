@@ -7,7 +7,7 @@
 Browsers cannot open raw TCP sockets. This proxy accepts WebSocket connections
 from the extension and pipes bytes to a real TCP service, so Python code inside
 the extension can talk to databases, SSH, Redis, SMTP, etc. via
-`pyext_runtime.TcpSocket`.
+`pyodex_runtime.TcpSocket`.
 
 Usage:
     uv run python_websocket_proxy.py --port 1234 --target localhost:6379

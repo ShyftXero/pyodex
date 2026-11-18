@@ -8,10 +8,10 @@
 
 Resolution uses `uv pip compile --python-platform wasm32-pyodide2025`, so only
 wheels that actually run in Pyodide (pure `py3-none-any` or
-`pyodide_2025_0_wasm32`) are accepted. Pins are written to `pyext.lock` beside
+`pyodide_2025_0_wasm32`) are accepted. Pins are written to `pyodex.lock` beside
 the project and reused until the dependency block changes.
 
-Wheels live once in a global store (`~/.cache/pyext/store/<name>/<version>/`)
+Wheels live once in a global store (`~/.cache/pyodex/store/<name>/<version>/`)
 with files chmod 0444 and dirs 0555, mirroring uv's shared package cache. Each
 built extension gets a copy-on-write link into the store: reflink when the
 filesystem supports it, else a hardlink (store file is read-only so writes
@@ -158,7 +158,7 @@ def store_dir() -> Path:
 
 
 def _download(url: str, dest: Path) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "pyext"})
+    req = urllib.request.Request(url, headers={"User-Agent": "pyodex"})
     with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as f:  # noqa: S310
         while chunk := r.read(1 << 16):
             f.write(chunk)
@@ -196,7 +196,7 @@ def ensure_in_store(pin: Pin, *, pyodide_lock: dict | None = None, pyodide_versi
             url = f"https://cdn.jsdelivr.net/pyodide/v{pyodide_version}/full/{meta['file_name']}"
             sha = meta.get("sha256")
     if not url:
-        req = urllib.request.Request(PYPI_JSON.format(name=pin.name), headers={"User-Agent": "pyext"})
+        req = urllib.request.Request(PYPI_JSON.format(name=pin.name), headers={"User-Agent": "pyodex"})
         with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
             meta = json.load(r)
         rel = meta["releases"].get(pin.version) or []

@@ -26,8 +26,8 @@ PYODIDE_CORE_FILES = (
 
 
 def cache_dir() -> Path:
-    base = os.environ.get("PYEXT_CACHE") or os.path.join(
-        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"), "pyext"
+    base = os.environ.get("PYODEX_CACHE") or os.path.join(
+        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"), "pyodex"
     )
     p = Path(base)
     p.mkdir(parents=True, exist_ok=True)
@@ -35,7 +35,7 @@ def cache_dir() -> Path:
 
 
 def _download(url: str, dest: Path) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "pyext"})
+    req = urllib.request.Request(url, headers={"User-Agent": "pyodex"})
     with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as f:  # noqa: S310
         while chunk := r.read(1 << 16):
             f.write(chunk)

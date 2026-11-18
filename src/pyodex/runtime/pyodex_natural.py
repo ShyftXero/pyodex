@@ -1,4 +1,4 @@
-"""pyext_natural: make Pyodide feel like plain Python inside the extension.
+"""pyodex_natural: make Pyodide feel like plain Python inside the extension.
 
 Installed by bootstrap before main.py runs. Everything degrades gracefully:
 each shim checks the capability it needs and leaves stdlib untouched if absent.
@@ -14,11 +14,11 @@ What it does (when the runtime allows it):
   time.sleep()  yields to the browser event loop under JSPI instead of spinning.
   webbrowser    `open()` -> window.open.
   open()/cwd    cwd is /home/pyodide/data on IndexedDB; persists across reloads.
-                Call `pyext_natural.save()` (or use `persist()` ctx) to flush.
+                Call `pyodex_natural.save()` (or use `persist()` ctx) to flush.
   pip           `pip_install("pkg")` via micropip at runtime.
   print()       stdout/stderr also mirrored to the overlay console pill.
 
-Settings via `pyext_natural.config` (set in main.py before use):
+Settings via `pyodex_natural.config` (set in main.py before use):
     config.proxy = "ws://127.0.0.1:1234"
     config.token = None
 """
@@ -55,7 +55,7 @@ config = Config()
 
 
 # --------------------------------------------------------------------------- #
-# Capability detection (same code runs in Node for `pyext pyodide probe`)
+# Capability detection (same code runs in Node for `pyodex pyodide probe`)
 # --------------------------------------------------------------------------- #
 
 
@@ -131,7 +131,7 @@ def _socket_native() -> bool:
 def _await(promise: Any) -> Any:
     """Block on a JS promise. Needs JSPI; raises clear error otherwise."""
     if not (run_sync and can_run_sync()):
-        raise RuntimeError("blocking socket needs JSPI (run_sync). Use pyext_runtime.TcpSocket (async) instead.")
+        raise RuntimeError("blocking socket needs JSPI (run_sync). Use pyodex_runtime.TcpSocket (async) instead.")
     return run_sync(promise)
 
 
@@ -536,5 +536,5 @@ def install(*, console: bool = True, persist_fs: bool = True) -> dict[str, Any]:
         try:
             _mount_persist()
         except Exception as e:  # noqa: BLE001
-            js.console.warn(f"[pyext] persistent fs unavailable: {e}")
+            js.console.warn(f"[pyodex] persistent fs unavailable: {e}")
     return caps

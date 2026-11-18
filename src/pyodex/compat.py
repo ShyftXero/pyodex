@@ -4,12 +4,12 @@ Mirrors haru-pack's approach for "thick" apps: a package is *known good* only
 if a real import test passed inside Pyodide (under Node), *known bad* if the
 resolve/fetch/import failed. Anything else is *untested*.
 
-Registry: `src/pyext/compat.json` (shipped) merged with `~/.cache/pyext/compat.json`
+Registry: `src/pyodex/compat.json` (shipped) merged with `~/.cache/pyodex/compat.json`
 (local results). Builder refuses known-bad packages unless `--allow-bad`.
 
-    pyext compat test requests numpy pandas
-    pyext compat test --top 50
-    pyext compat list [good|bad|untested]
+    pyodex compat test requests numpy pandas
+    pyodex compat test --top 50
+    pyodex compat list [good|bad|untested]
 """
 
 from __future__ import annotations
@@ -270,7 +270,7 @@ def test_package(name: str, pyodide_version: str = PYODIDE_VERSION, timeout: int
 
 
 def top_packages(n: int = 50) -> list[str]:
-    req = urllib.request.Request(TOP_URL, headers={"User-Agent": "pyext"})
+    req = urllib.request.Request(TOP_URL, headers={"User-Agent": "pyodex"})
     with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
         rows = json.load(r)["rows"]
     return [row["project"] for row in rows[:n]]
@@ -284,7 +284,7 @@ def check_pins(pins: list[Pin], *, allow_bad: bool = False) -> None:
         if st == "bad":
             bad.append(f"  {p.key}=={p.version}: {why}")
     if bad and not allow_bad:
-        raise RuntimeError("known-incompatible packages (run `pyext compat test NAME` to re-check, or --allow-bad):\n"
+        raise RuntimeError("known-incompatible packages (run `pyodex compat test NAME` to re-check, or --allow-bad):\n"
                            + "\n".join(bad))
     if bad:
         print("warning: building with known-bad packages:\n" + "\n".join(bad))

@@ -1,13 +1,13 @@
-"""Assemble a loadable Chrome extension from a pyext project directory.
+"""Assemble a loadable Chrome extension from a pyodex project directory.
 
 Project layout (input):
 
     myext/
-    ├── pyext.toml        # extension config
+    ├── pyodex.toml        # extension config
     ├── main.py           # Python entry point (runs inside Pyodide)
     ├── overlay.css       # optional: styles for the overlay page
     ├── overlay.body.html # optional: markup injected into overlay <body>
-    └── <extra files / packages listed in pyext.toml>
+    └── <extra files / packages listed in pyodex.toml>
 
 Output (dist/<slug>/) is a flat unpacked extension ready for "Load unpacked".
 """
@@ -49,7 +49,7 @@ class ExtConfig:
     icon: str = ""
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
     overlay_body: str = ""  # inline alternative to overlay.body.html
-    natural: bool = True  # install pyext_natural shims (socket/ssl/input/sleep/persistent fs/pip)
+    natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
 
     @property
     def slug(self) -> str:
@@ -81,23 +81,23 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
 
 
 def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
-    """Accept a project dir (pyext.toml) or a single script (PEP 723 `[tool.pyext]`).
+    """Accept a project dir (pyodex.toml) or a single script (PEP 723 `[tool.pyodex]`).
 
     Returns (project_root, config). For a single script, project_root is the
     script's directory and `entry` is the script filename.
     """
     if target.is_dir():
-        cfg_path = target / "pyext.toml"
+        cfg_path = target / "pyodex.toml"
         if not cfg_path.exists():
-            raise FileNotFoundError(f"no pyext.toml in {target}")
+            raise FileNotFoundError(f"no pyodex.toml in {target}")
         data = tomllib.loads(cfg_path.read_text())
         return target, _config_from_data(data, default_name=target.name, default_entry="main.py")
     if target.suffix == ".py":
         from .packages import read_pep723
 
         meta = read_pep723(target)
-        tool = meta.get("tool", {}).get("pyext", {})
-        # [tool.pyext] is flat; [tool.pyext.vendor] holds URL assets.
+        tool = meta.get("tool", {}).get("pyodex", {})
+        # [tool.pyodex] is flat; [tool.pyodex.vendor] holds URL assets.
         data = {"extension": {k: v for k, v in tool.items() if k != "vendor"}, "vendor": tool.get("vendor", {})}
         return target.parent, _config_from_data(data, default_name=target.stem, default_entry=target.name)
     raise FileNotFoundError(f"{target}: not a project dir or .py script")
@@ -149,7 +149,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         shutil.rmtree(out)
     out.mkdir(parents=True)
 
-    resources: list[str] = ["overlay.html", "bootstrap.js", "pyext_runtime.py", "pyext_natural.py",
+    resources: list[str] = ["overlay.html", "bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
                             "pyodide/*", "app/*", "wheels/*"]
 
     # 1. Pyodide core
@@ -161,9 +161,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         if p.exists():
             shutil.copy2(p, pyo_dst / name)
 
-    # 1b. Dependencies: PEP 723 block in entry + pyext.toml extras + HTTP shims.
-    #     Resolved for wasm32-pyodide via uv, pinned in pyext.lock, stored once
-    #     read-only in ~/.cache/pyext/store and CoW-linked into dist/wheels.
+    # 1b. Dependencies: PEP 723 block in entry + pyodex.toml extras + HTTP shims.
+    #     Resolved for wasm32-pyodide via uv, pinned in pyodex.lock, stored once
+    #     read-only in ~/.cache/pyodex/store and CoW-linked into dist/wheels.
     wheels = out / "wheels"
     wheels.mkdir()
     reqs = list(HTTP_SHIM_PACKAGES) if cfg.http else []
@@ -171,7 +171,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     reqs += [r for r in script_dependencies(project / cfg.entry) if r not in reqs]
     pyodide_lock = json.loads((pyo_src / "pyodide-lock.json").read_text())
     py_ver = pyodide_lock["info"]["python"].rsplit(".", 1)[0]  # "3.14.1" -> "3.14"
-    pins = lock(project / f"{cfg.slug}.pyext.lock" if cfg.entry != "main.py" else project / "pyext.lock",
+    pins = lock(project / f"{cfg.slug}.pyodex.lock" if cfg.entry != "main.py" else project / "pyodex.lock",
                 reqs, py_ver, constraints=pyodide_constraints(pyodide_lock))
     from .compat import check_pins
 
@@ -214,8 +214,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append(cfg.icon)
 
     # 5. Runtime helper (python)
-    shutil.copy2(RUNTIME / "pyext_runtime.py", out / "pyext_runtime.py")
-    shutil.copy2(RUNTIME / "pyext_natural.py", out / "pyext_natural.py")
+    shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
+    shutil.copy2(RUNTIME / "pyodex_natural.py", out / "pyodex_natural.py")
 
     # 6. Templates
     body = cfg.overlay_body or ((project / "overlay.body.html").read_text() if (project / "overlay.body.html").exists() else "")

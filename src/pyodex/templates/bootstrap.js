@@ -1,9 +1,9 @@
 // Boots Pyodide from the extension's local pyodide/ folder, installs the
-// pyext runtime helper and the app's Python files into the virtual FS, then
+// pyodex runtime helper and the app's Python files into the virtual FS, then
 // runs app/main.py.
 import { loadPyodide } from "./pyodide/pyodide.mjs";
 
-const status = document.getElementById("pyext-status");
+const status = document.getElementById("pyodex-status");
 const setStatus = (text, isError = false) => {
   if (!status) return;
   status.textContent = text;
@@ -20,9 +20,9 @@ async function boot() {
   const pyodide = await loadPyodide({ indexURL: chrome.runtime.getURL("pyodide/") });
   window.pyodide = pyodide;
 
-  // Runtime helper importable as `pyext_runtime`.
-  pyodide.FS.writeFile("/home/pyodide/pyext_runtime.py", await fetchText("pyext_runtime.py"));
-  pyodide.FS.writeFile("/home/pyodide/pyext_natural.py", await fetchText("pyext_natural.py"));
+  // Runtime helper importable as `pyodex_runtime`.
+  pyodide.FS.writeFile("/home/pyodide/pyodex_runtime.py", await fetchText("pyodex_runtime.py"));
+  pyodide.FS.writeFile("/home/pyodide/pyodex_natural.py", await fetchText("pyodex_natural.py"));
 
   // App files -> /home/pyodide/app, on sys.path so `main.py` can import siblings.
   const files = JSON.parse(await fetchText("app/files.json"));
@@ -57,9 +57,9 @@ async function boot() {
   if (idx.natural) {
     // socket/ssl/input/sleep/persistent-fs/pip shims; each self-gates on detected capability.
     setStatus("Installing Python shims…");
-    const caps = await pyodide.runPythonAsync("import pyext_natural, json; json.dumps(pyext_natural.install())");
-    window.pyextCaps = JSON.parse(caps);
-    console.debug("[pyext] capabilities", window.pyextCaps);
+    const caps = await pyodide.runPythonAsync("import pyodex_natural, json; json.dumps(pyodex_natural.install())");
+    window.pyodexCaps = JSON.parse(caps);
+    console.debug("[pyodex] capabilities", window.pyodexCaps);
   }
 
   setStatus("Running main.py…");
@@ -68,6 +68,6 @@ async function boot() {
 }
 
 boot().catch((err) => {
-  console.error("[pyext] boot error:", err);
+  console.error("[pyodex] boot error:", err);
   setStatus("Python error: " + (err?.message || err), true);
 });

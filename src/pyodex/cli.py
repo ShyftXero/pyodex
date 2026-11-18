@@ -1,10 +1,10 @@
-"""pyext command line.
+"""pyodex command line.
 
 Commands:
-  pyext init <dir>        scaffold a new extension project
-  pyext build <dir>       assemble a loadable extension into dist/<name>/
-  pyext zip <dir>         build and produce dist/<name>.zip
-  pyext fetch             download / refresh the Pyodide runtime cache
+  pyodex init <dir>        scaffold a new extension project
+  pyodex build <dir>       assemble a loadable extension into dist/<name>/
+  pyodex zip <dir>         build and produce dist/<name>.zip
+  pyodex fetch             download / refresh the Pyodide runtime cache
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def _cmd_pyodide(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="pyext", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(prog="pyodex", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init", help="scaffold a new extension project")

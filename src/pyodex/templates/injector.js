@@ -1,6 +1,6 @@
 // Content script: injects a transparent, click-through overlay iframe onto the page.
 (() => {
-  const FRAME_ID = "pyext-{{SLUG}}-frame";
+  const FRAME_ID = "pyodex-{{SLUG}}-frame";
   const URL_FILTER = {{URL_FILTER}};
 
   if (document.getElementById(FRAME_ID)) return;
@@ -27,16 +27,16 @@
 
   document.documentElement.appendChild(iframe);
 
-  // Bridge: overlay <-> page. Overlay posts {pyext: true, type, payload}; we relay
+  // Bridge: overlay <-> page. Overlay posts {pyodex: true, type, payload}; we relay
   // page info back on request so Python can read URL/title without DOM access.
   window.addEventListener("message", (ev) => {
     if (ev.source !== iframe.contentWindow) return;
     const msg = ev.data;
-    if (!msg || msg.pyext !== true) return;
+    if (!msg || msg.pyodex !== true) return;
 
     if (msg.type === "page.info") {
       iframe.contentWindow.postMessage(
-        { pyext: true, type: "page.info", id: msg.id, payload: { url: location.href, title: document.title } },
+        { pyodex: true, type: "page.info", id: msg.id, payload: { url: location.href, title: document.title } },
         "*"
       );
     } else if (msg.type === "page.pointer") {

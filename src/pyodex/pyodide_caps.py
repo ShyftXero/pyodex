@@ -1,13 +1,13 @@
 """Pyodide capability snapshots.
 
-Runs `pyext_natural.detect()` plus a JS-side API probe inside a real Pyodide
-under Node and stores the result in `src/pyext/capabilities/<version>.json`.
+Runs `pyodex_natural.detect()` plus a JS-side API probe inside a real Pyodide
+under Node and stores the result in `src/pyodex/capabilities/<version>.json`.
 `diff` shows what a newer Pyodide adds/removes so shims can be extended.
 
-    pyext pyodide probe                  # current PYODIDE_VERSION
-    pyext pyodide probe --version 315.0.0
-    pyext pyodide latest                 # newest GitHub release tag
-    pyext pyodide diff 314.0.8 315.0.0
+    pyodex pyodide probe                  # current PYODIDE_VERSION
+    pyodex pyodide probe --version 315.0.0
+    pyodex pyodide latest                 # newest GitHub release tag
+    pyodex pyodide diff 314.0.8 315.0.0
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ const [, , indexURL, naturalPath] = process.argv;
 const { loadPyodide } = await import(indexURL + "/pyodide.mjs");
 const fs = await import("node:fs");
 const py = await loadPyodide({ indexURL, stdout: () => {}, stderr: () => {} });
-py.FS.writeFile("/home/pyodide/pyext_natural.py", fs.readFileSync(naturalPath, "utf8"));
+py.FS.writeFile("/home/pyodide/pyodex_natural.py", fs.readFileSync(naturalPath, "utf8"));
 await py.runPythonAsync("import sys; sys.path.insert(0, '/home/pyodide')");
 globalThis.pyodide = py;  // natural.py reads js.pyodide.FS
-const pyCaps = JSON.parse(await py.runPythonAsync("import pyext_natural, json; json.dumps(pyext_natural.detect())"));
+const pyCaps = JSON.parse(await py.runPythonAsync("import pyodex_natural, json; json.dumps(pyodex_natural.detect())"));
 const lock = JSON.parse(fs.readFileSync(indexURL + "/pyodide-lock.json", "utf8"));
 const out = {
   ...pyCaps,
@@ -56,7 +56,7 @@ def probe(version: str = PYODIDE_VERSION, *, save: bool = True) -> dict:
         runner = Path(td) / "probe.mjs"
         runner.write_text(PROBE_JS)
         proc = subprocess.run([node, "--experimental-wasm-stack-switching", str(runner), str(pyo),
-                               str(RUNTIME / "pyext_natural.py")], capture_output=True, text=True, timeout=300, check=False)
+                               str(RUNTIME / "pyodex_natural.py")], capture_output=True, text=True, timeout=300, check=False)
     if proc.returncode:
         raise RuntimeError(f"probe failed:\n{proc.stderr[-800:]}")
     caps = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -76,7 +76,7 @@ def load(version: str) -> dict:
 
 def latest() -> str:
     req = urllib.request.Request("https://api.github.com/repos/pyodide/pyodide/releases/latest",
-                                 headers={"User-Agent": "pyext"})
+                                 headers={"User-Agent": "pyodex"})
     with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
         return json.load(r)["tag_name"]
 

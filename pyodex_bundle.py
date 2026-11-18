@@ -1,21 +1,21 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pyext"]
+# dependencies = ["pyodex"]
 #
 # [tool.uv.sources]
-# pyext = { path = ".", editable = true }
+# pyodex = { path = ".", editable = true }
 # ///
 """Bundle a single PEP 723 Python script into an installable Chrome extension.
 
-    uv run shyft_ext_bundle.py my_cool_ext.py
-    uv run shyft_ext_bundle.py my_cool_ext.py --out ~/Desktop --no-zip
+    uv run pyodex_bundle.py my_cool_ext.py
+    uv run pyodex_bundle.py my_cool_ext.py --out ~/Desktop --no-zip
 
 The script declares its Python deps and extension config inline:
 
     # /// script
     # dependencies = ["requests", "numpy"]
     #
-    # [tool.pyext]
+    # [tool.pyodex]
     # name = "My Cool Ext"
     # version = "0.1.0"
     # matches = ["*://*.example.com/*"]
@@ -24,7 +24,7 @@ The script declares its Python deps and extension config inline:
     # overlay_css = "#x { color: red }"
     # overlay_body = "<div id='x'></div>"
     #
-    # [tool.pyext.vendor]
+    # [tool.pyodex.vendor]
     # "lib.js" = "https://cdn.jsdelivr.net/npm/some-lib/dist/index.umd.js"
     # ///
 
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--refresh-lock", action="store_true", help="re-resolve dependencies")
     args = p.parse_args(argv)
 
-    from pyext.builder import build_extension, resolve_project, zip_dir
+    from pyodex.builder import build_extension, resolve_project, zip_dir
 
     script = Path(args.script).resolve()
     if not script.is_file() or script.suffix != ".py":
@@ -55,9 +55,9 @@ def main(argv: list[str] | None = None) -> int:
 
     project, cfg = resolve_project(script)
     if args.refresh_lock:
-        for lk in project.glob("*.pyext.lock"):
+        for lk in project.glob("*.pyodex.lock"):
             lk.unlink()
-        (project / "pyext.lock").unlink(missing_ok=True)
+        (project / "pyodex.lock").unlink(missing_ok=True)
 
     out_root = Path(args.out).resolve() if args.out else project / "dist"
     built = build_extension(script, out_root / cfg.slug)

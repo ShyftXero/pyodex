@@ -1,4 +1,4 @@
-"""Scaffold a new pyext project directory."""
+"""Scaffold a new pyodex project directory."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ entry = "main.py"
 
 MAIN_PY = '''"""Entry point. Runs inside Pyodide in the extension overlay iframe."""
 
-from pyext_runtime import Overlay, on
+from pyodex_runtime import Overlay, on
 
 ui = Overlay()
 btn = ui.button("Hello from Python", top=16, left=16)
@@ -44,7 +44,7 @@ def init_project(target: Path, name: str, matches: list[str] | None) -> None:
     matches = matches or ["<all_urls>"]
     m = "[" + ", ".join(f'"{x}"' for x in matches) + "]"
     files = {
-        "pyext.toml": PYEXT_TOML.format(name=name, matches=m),
+        "pyodex.toml": PYEXT_TOML.format(name=name, matches=m),
         "main.py": MAIN_PY,
         "overlay.css": OVERLAY_CSS,
         "overlay.body.html": OVERLAY_BODY,
