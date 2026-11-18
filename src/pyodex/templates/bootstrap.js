@@ -42,6 +42,19 @@ async function fetchText(rel) {
   return r.text();
 }
 
+// Tells the content script this overlay is still in use, so an idle tab can free
+// the interpreter. Without this the page cannot know whether Python is active.
+const heartbeat = () => {
+  try {
+    window.parent.postMessage({ pyodex: true, type: "page.heartbeat", payload: Date.now() }, "*");
+  } catch {
+    /* parent gone */
+  }
+};
+for (const ev of ["pointerdown", "keydown", "focus"]) {
+  window.addEventListener(ev, heartbeat, { capture: true, passive: true });
+}
+
 async function boot() {
   const pyodide = await loadPyodide({ indexURL: chrome.runtime.getURL("pyodide/") });
   window.pyodide = pyodide;
@@ -87,6 +100,9 @@ async function boot() {
     window.pyodexCaps = JSON.parse(caps);
     console.debug("[pyodex] capabilities", window.pyodexCaps);
   }
+
+  heartbeat();
+  setInterval(heartbeat, 30000); // keeps a busy-but-quiet overlay from being reaped
 
   setStatus("Running main.py…");
   await pyodide.runPythonAsync(await fetchText("app/main.py"));

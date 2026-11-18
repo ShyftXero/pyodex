@@ -1,32 +1,161 @@
-// Content script: injects a transparent, click-through overlay iframe onto the page.
+// Content script: puts a launcher button on matching pages and boots the
+// Python overlay only when it is clicked.
+//
+// With 40+ tabs open, booting Pyodide in every matching tab is the wrong
+// default: each tab would pay a wasm compile plus its own heap (tens of MB).
+// Idle tabs therefore cost nothing here — no iframe, no interpreter — and the
+// interpreter is released again after `idle_timeout` seconds without activity.
 (() => {
   const FRAME_ID = "pyodex-{{SLUG}}-frame";
+  const LAUNCHER_ID = "pyodex-{{SLUG}}-launcher";
   const URL_FILTER = {{URL_FILTER}};
+  const CEILING = {{BOOT_MODE}};      // "user" | "visible" | "auto" (config ceiling)
+  const IDLE_MS = {{IDLE_TIMEOUT_MS}};
+  const REAP_HIDDEN_MS = {{REAP_HIDDEN_MS}};
+  const MAX_LIVE = {{MAX_LIVE}};
+  const LABEL = {{LABEL}};
+  const RANK = { user: 0, visible: 1, auto: 2 };
 
-  if (document.getElementById(FRAME_ID)) return;
+  if (document.getElementById(FRAME_ID) || document.getElementById(LAUNCHER_ID)) return;
   if (URL_FILTER && !window.location.href.toLowerCase().includes(URL_FILTER.toLowerCase())) return;
   if (window.top !== window) return; // top frame only
 
-  const iframe = document.createElement("iframe");
-  iframe.id = FRAME_ID;
-  iframe.src = chrome.runtime.getURL("overlay.html");
-  iframe.setAttribute("allowtransparency", "true");
+  let iframe = null;
+  let idleTimer = null;
+  let hiddenTimer = null;
+  let host = null;
+  let btn = null;
+  let mode = CEILING;
+  const pageKey = Math.random().toString(36).slice(2);
 
-  Object.assign(iframe.style, {
-    position: "fixed",
-    top: "0",
-    left: "0",
-    width: "100vw",
-    height: "100vh",
-    border: "none",
-    zIndex: "2147483647",
-    pointerEvents: "none",
-    background: "transparent",
-    colorScheme: "normal",
-  });
+  // ---- interpreter budget ---------------------------------------------- //
+  // Best-effort lease in storage.session: an "auto"/"visible" build cannot
+  // quietly hold an interpreter in every one of 40 tabs.
+  async function budgetOk() {
+    if (!MAX_LIVE) return true;
+    try {
+      const { pyodexLive = {} } = await chrome.storage.session.get("pyodexLive");
+      const now = Date.now();
+      for (const k of Object.keys(pyodexLive)) {
+        if (now - pyodexLive[k] > 900000) delete pyodexLive[k]; // stale lease
+      }
+      await chrome.storage.session.set({ pyodexLive });
+      return Object.keys(pyodexLive).length < MAX_LIVE;
+    } catch {
+      return true; // storage.session unavailable: never block the app
+    }
+  }
 
-  document.documentElement.appendChild(iframe);
+  async function claimSlot() {
+    if (!MAX_LIVE) return;
+    try {
+      const { pyodexLive = {} } = await chrome.storage.session.get("pyodexLive");
+      pyodexLive[pageKey] = Date.now();
+      await chrome.storage.session.set({ pyodexLive });
+    } catch { /* best effort */ }
+  }
 
+  function releaseSlot() {
+    if (!MAX_LIVE) return;
+    chrome.storage.session
+      .get("pyodexLive")
+      .then(({ pyodexLive = {} }) => {
+        delete pyodexLive[pageKey];
+        return chrome.storage.session.set({ pyodexLive });
+      })
+      .catch(() => {});
+  }
+
+  // ---- launcher -------------------------------------------------------- //
+  function makeLauncher() {
+    host = document.createElement("div");
+    host.id = LAUNCHER_ID;
+    // Shadow DOM: page CSS cannot restyle or break the button.
+    const root = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      :host { all: initial; }
+      .wrap { position: fixed; top: 16px; left: 16px; z-index: 2147483647; }
+      button {
+        pointer-events: auto; cursor: pointer;
+        padding: 10px 16px; font: 600 14px system-ui, -apple-system, sans-serif;
+        color: #fff; background: #18181b; border: 2px solid #f43f5e; border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,.25); transition: transform .1s ease, background .2s ease;
+      }
+      button:hover:not(:disabled) { background: #27272a; transform: scale(1.03); }
+      button:disabled { opacity: .7; cursor: wait; }
+    `;
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = LABEL;
+    btn.addEventListener("click", onActivate);
+    wrap.append(btn);
+    root.append(style, wrap);
+    document.documentElement.appendChild(host);
+  }
+
+  function showLauncher() {
+    if (!host) makeLauncher();
+    host.style.display = "";
+    btn.disabled = false;
+    btn.textContent = LABEL;
+  }
+
+  function hideLauncher() {
+    if (host) host.style.display = "none";
+  }
+
+  // ---- overlay lifecycle ----------------------------------------------- //
+  function onActivate() {
+    if (iframe) return;
+    btn.disabled = true;
+    btn.textContent = "Loading Python…";
+    boot();
+  }
+
+  function boot() {
+    iframe = document.createElement("iframe");
+    iframe.id = FRAME_ID;
+    iframe.src = chrome.runtime.getURL("overlay.html");
+    iframe.setAttribute("allowtransparency", "true");
+
+    Object.assign(iframe.style, {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100vw",
+      height: "100vh",
+      border: "none",
+      zIndex: "2147483647",
+      pointerEvents: "none",
+      background: "transparent",
+      colorScheme: "normal",
+    });
+
+    document.documentElement.appendChild(iframe);
+    hideLauncher();
+    claimSlot();
+    resetIdle();
+  }
+
+  function teardown() {
+    if (!iframe) return;
+    iframe.remove();
+    iframe = null;
+    clearTimeout(idleTimer);
+    releaseSlot();
+    showLauncher(); // next click boots a fresh interpreter
+  }
+
+  function resetIdle() {
+    if (!IDLE_MS) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(teardown, IDLE_MS);
+  }
+
+  // ---- content-script <-> overlay bridge -------------------------------- //
   const MAX_NODES = 500;
   const desc = (el) => {
     const r = el.getBoundingClientRect();
@@ -120,38 +249,75 @@
     }
   }
 
-  // Bridge: overlay <-> page. Overlay posts {pyodex: true, type, payload}; we relay
-  // page info back on request so Python can read URL/title without DOM access.
   window.addEventListener("message", (ev) => {
-    if (ev.source !== iframe.contentWindow) return;
+    if (!iframe || ev.source !== iframe.contentWindow) return;
     const msg = ev.data;
     if (!msg || msg.pyodex !== true) return;
 
-    if (msg.type === "page.info") {
+    if (msg.type === "page.heartbeat") {
+      resetIdle();
+    } else if (msg.type === "page.info") {
       iframe.contentWindow.postMessage(
         { pyodex: true, type: "page.info", id: msg.id, payload: { url: location.href, title: document.title } },
         "*"
       );
     } else if (msg.type === "page.dom") {
-      // Explicit, small op set. No eval: page CSP applies as usual.
       let payload, error = null;
       try {
         payload = runDomOp(msg.payload || {});
       } catch (e) {
         error = String(e && e.message || e);
       }
-      iframe.contentWindow.postMessage(
-        { pyodex: true, type: "page.dom", id: msg.id, payload, error },
-        "*"
-      );
+      iframe.contentWindow.postMessage({ pyodex: true, type: "page.dom", id: msg.id, payload, error }, "*");
     } else if (msg.type === "page.events") {
-      // Subscribe once per selector: page-side click/input -> overlay event stream.
       subscribeEvents(msg.payload || {});
     } else if (msg.type === "page.pointer") {
-      // Let Python toggle whether the whole overlay captures clicks.
       iframe.style.pointerEvents = msg.payload ? "auto" : "none";
+    } else if (msg.type === "page.boot") {
+      // Runtime request from Python. Bounded by the configured ceiling: an app
+      // can hand work back or ask for more, but never beyond the build's policy.
+      const want = String(msg.payload || "auto");
+      if (RANK[want] !== undefined && RANK[want] <= RANK[CEILING]) {
+        mode = want;
+        start();
+      }
+    } else if (msg.type === "page.release") {
+      teardown();
     } else if (msg.type === "page.remove") {
-      iframe.remove();
+      teardown();
     }
   });
+
+  // ---- start ------------------------------------------------------------ //
+  async function start() {
+    if (mode === "user") {
+      showLauncher();
+      return;
+    }
+    if (mode === "visible" && document.visibilityState !== "visible") {
+      showLauncher(); // boots when the tab becomes visible
+      return;
+    }
+    if (!(await budgetOk())) {
+      showLauncher(); // over budget: degrade to click-to-run instead of refusing
+      return;
+    }
+    if (!iframe) boot();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (mode === "user") return;
+    if (document.visibilityState === "hidden") {
+      if (!REAP_HIDDEN_MS) return;
+      clearTimeout(hiddenTimer);
+      hiddenTimer = setTimeout(() => {
+        if (document.visibilityState === "hidden") teardown(); // reclaim memory
+      }, REAP_HIDDEN_MS);
+    } else {
+      clearTimeout(hiddenTimer);
+      if (!iframe) start(); // tab is back: bring Python back
+    }
+  });
+
+  start();
 })();

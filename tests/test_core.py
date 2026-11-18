@@ -112,3 +112,60 @@ def test_caps_diff(monkeypatch, tmp_path):
     assert d["added"]["packages"] == {"z": "1"} and d["removed"]["packages"] == {"y": "1"}
     assert d["changed"]["packages"] == {"x": ("1", "2")}
     assert "jspi" in format_diff(d)
+
+
+def _build(tmp_path, toml, entry="print('hi')\n"):
+    from pyodex.builder import build_extension
+
+    (tmp_path / "pyodex.toml").write_text(toml)
+    (tmp_path / "main.py").write_text(entry)
+    built = build_extension(tmp_path, tmp_path / "out")
+    return built, (built / "injector.js").read_text()
+
+
+def test_boot_defaults_to_user(tmp_path):
+    """Default: no interpreter until the user clicks the launcher."""
+    _, js = _build(tmp_path, '[extension]\nname = "Lazy Ext"\n')
+    assert 'const CEILING = "user";' in js
+    assert "const IDLE_MS = 600000;" in js
+    assert "const MAX_LIVE = 0;" in js
+    assert "attachShadow" in js
+    assert "page.heartbeat" in js
+    assert js.count("document.documentElement.appendChild(iframe)") == 1
+
+
+def test_on_load_infers_visible_boot(tmp_path):
+    """Declaring a load-time hook is the sanctioned way to ask for auto-boot."""
+    import pyodex.builder as b
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "Onload"\n')
+    (tmp_path / "main.py").write_text("from pyodex_runtime import on_load\n@on_load\ndef go(): pass\n")
+    cfg = b.resolve_project(tmp_path)[1]
+    assert cfg.boot == "visible"
+
+
+def test_explicit_boot_wins_over_on_load(tmp_path):
+    import pyodex.builder as b
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "Onload"\nboot = "user"\n')
+    (tmp_path / "main.py").write_text("from pyodex_runtime import on_load\n@on_load\ndef go(): pass\n")
+    assert b.resolve_project(tmp_path)[1].boot == "user"
+
+
+def test_legacy_lazy_false_maps_to_auto(tmp_path):
+    _, js = _build(tmp_path, '[extension]\nname = "Eager"\nlazy = false\nidle_timeout = 0\n')
+    assert 'const CEILING = "auto";' in js and "const IDLE_MS = 0;" in js
+
+
+def test_boot_mode_validated(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError):
+        _build(tmp_path, '[extension]\nname = "Bad"\nboot = "whenever"\n')
+
+
+def test_max_live_and_reap_hidden_render(tmp_path):
+    _, js = _build(tmp_path, '[extension]\nname = "Budget"\nboot = "visible"\nmax_live = 4\nreap_hidden_after = 60\n')
+    assert "const MAX_LIVE = 4;" in js
+    assert "const REAP_HIDDEN_MS = 60000;" in js
+    assert 'const CEILING = "visible";' in js

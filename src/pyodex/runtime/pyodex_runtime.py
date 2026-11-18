@@ -78,6 +78,41 @@ def status(text: str | None, error: bool = False) -> None:
         s.classList.remove("error")
 
 
+def _post(type_: str, payload: Any = None) -> None:
+    window.parent.postMessage(jsobj({"pyodex": True, "type": type_, "payload": payload}), "*")
+
+
+def on_load(fn: Callable) -> Callable:
+    """Mark this app as needing load-time execution.
+
+    Using this decorator lets the build infer `boot = "visible"` instead of
+    someone hand-setting `boot = "auto"` and paying for it in every tab.
+    The function runs immediately (we are already on load).
+    """
+    _LOAD_HOOKS.append(fn)
+    fn()
+    return fn
+
+
+_LOAD_HOOKS: list[Any] = []
+
+
+def want_boot(mode: str = "auto") -> None:
+    """Ask the host page to boot (or stay) in `mode`.
+
+    Only ever downgrades in practice: the content script refuses anything above
+    the configured ceiling, so an app cannot escape a "user" build.
+    """
+    if mode not in ("user", "visible", "auto"):
+        raise ValueError(f"mode must be user|visible|auto, got {mode!r}")
+    _post("page.boot", mode)
+
+
+def release() -> None:
+    """Free this tab's interpreter now (e.g. the work is done). Reload state is lost."""
+    _post("page.release")
+
+
 class Overlay:
     """Convenience wrapper around the overlay document body.
 

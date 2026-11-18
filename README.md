@@ -63,6 +63,42 @@ myext/
 3. `pyodex_runtime` (importable from `main.py`) gives you `Overlay`, `on`, `el`,
    `Page` (talk to host page), `WebSocketClient`, `TcpSocket`, `fetch_json`, `vendored`.
 
+## Boot policy
+
+One Pyodide instance runs per tab, with its own heap. Booting every matching tab
+is expensive when a user has dozens open, so a tab starts dormant unless the
+project asks otherwise.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `boot` | `"user"` | `user`: launcher button, boot on click. `visible`: boot when the tab is visible. `auto`: boot on every page load. |
+| `idle_timeout` | `600` | `user` mode: seconds without activity before the interpreter is freed. |
+| `reap_hidden_after` | `300` | `visible`/`auto`: seconds hidden before the interpreter is freed, and re-booted when the tab returns. |
+| `max_live` | `0` | Cap on interpreters across all tabs. Tabs over the cap fall back to click-to-run instead of refusing. |
+
+Declaring load-time work is the sanctioned way to change the default:
+
+```python
+from pyodex_runtime import on_load
+
+@on_load
+def start():
+    scan_page()          # runs as soon as the page loads
+```
+
+`@on_load` implies `boot = "visible"` when no policy is set, so a hidden tab is
+released and re-booted on return. Set `boot = "auto"` only if the app must keep
+running while hidden — that is the mode that costs memory in every tab.
+
+Python can also negotiate at runtime, always within the build's ceiling:
+
+```python
+want_boot("visible")   # ask for more than click-to-run (refused if the build says "user")
+release()              # done: free this tab's interpreter now
+```
+
+`lazy = true|false` is still accepted as an alias for `boot = "user"|"auto"`.
+
 ## Dependencies (PEP 723)
 
 Declare packages inline in `main.py`:
