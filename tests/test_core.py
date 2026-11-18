@@ -345,3 +345,14 @@ def test_generated_js_is_syntactically_valid(tmp_path):
         proc = subprocess.run(["node", "--input-type=module", "--check"], input=src,
                               capture_output=True, text=True)
         assert proc.returncode == 0, f"{name}: {proc.stderr.strip()[:400]}"
+
+
+def test_pip_install_pins_index_and_verifies():
+    """micropip no-ops without index_urls (pyodide#6569); keep both guards."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "pyodex" / "runtime" / "pyodex_natural.py").read_text()
+    assert "index_urls=[DEFAULT_INDEX]" in src
+    assert "DEFAULT_INDEX = \"https://pypi.org/simple/\"" in src
+    assert "_verify_imports(list(packages))" in src
+    assert "pyodide/pyodide/issues/6569" in src  # the reason, not just the code
