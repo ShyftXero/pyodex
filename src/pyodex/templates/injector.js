@@ -71,8 +71,9 @@
   function makeLauncher() {
     host = document.createElement("div");
     host.id = LAUNCHER_ID;
-    // Shadow DOM: page CSS cannot restyle or break the button.
-    const root = host.attachShadow({ mode: "closed" });
+    // Shadow DOM: page CSS cannot restyle or break the button. "open" keeps it
+    // inspectable for DevTools and the Chrome test harness; isolation is the same.
+    const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = `
       :host { all: initial; }

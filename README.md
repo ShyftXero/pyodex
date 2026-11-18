@@ -372,12 +372,41 @@ path is ready if that changes, and so you can run it as a standalone IWA now.
 ## Tests
 
 ```
-uv run pytest -q                 # unit: pep723, allowlist, proxy routing, CoW link, caps diff
-uv run tests/e2e_natural.py      # e2e: real servers + proxy + Pyodide under Node
+uv run pytest -q                 # unit: pep723, declarations, allowlist, CoW link, caps diff
+uv run tests/e2e_natural.py      # sockets under Node: real servers + proxy
+uv run tests/chrome_harness.py   # real Chromium: the release gate
 ```
 
 The e2e suite proves the socket shim against actual protocol clients: raw sockets,
 `select`, `http.client`, `smtplib`, `redis-py`, and proxy-terminated TLS.
+
+### Chrome harness (the gate)
+
+Six extensions, each built from a fixture and loaded into a real browser:
+
+| Level | Proves |
+|---|---|
+| L1 trivial | content script, launcher, Pyodide boot, overlay DOM |
+| L2 quickstart | dependencies (numpy), compute, cross-origin HTTP, async |
+| L3 tutorial | `@urlmatch`/`@watch_for`/`@on_event`, host-page DOM, IDBFS persistence across reload, no boot on unmatched pages |
+| L4.1 web | URL gate + trigger boot, two tabs filled independently, `keep_alive`, traceback surfacing |
+| L4.2 net | `requests`, raw TCP over the proxy, proxy-terminated TLS, WebSocket |
+| L4.3 runtime | micropip at runtime, persistent dir, `input()` via prompt, capability probe |
+
+```
+uv run tests/chrome_harness.py                # all levels, parallel
+uv run tests/chrome_harness.py L3 L4.2        # subset
+uv run tests/chrome_harness.py --jobs 8       # override parallelism
+uv run tests/chrome_harness.py --headed       # watch it happen (uses Xvfb if headless host)
+```
+
+Parallelism is picked from the machine: half the CPUs, capped by available memory
+(~900 MB per browser), clamped to 2–20. Tests run headless by default, which needs
+Playwright's **bundled Chromium** (`channel="chromium"`) — installed Chrome 137+
+ignores `--load-extension`, and the headless *shell* cannot load extensions at all.
+
+Monotonicity is enforced: if L4 passes while L1 fails, the run is reported as
+untrustworthy rather than green.
 
 ## Example
 

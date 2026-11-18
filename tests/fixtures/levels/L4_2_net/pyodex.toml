@@ -1,0 +1,5 @@
+[extension]
+name = "L4.2 Net"
+matches = ["<all_urls>"]
+http = true
+reap_hidden_after = 0

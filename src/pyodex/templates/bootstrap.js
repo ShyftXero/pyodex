@@ -55,6 +55,9 @@ for (const ev of ["pointerdown", "keydown", "focus"]) {
   window.addEventListener(ev, heartbeat, { capture: true, passive: true });
 }
 
+// Python reports background-task failures here (see pyodex_runtime._task_done).
+window.pyodexReportError = (msg) => showError(new Error(msg), "Python error");
+
 async function boot() {
   const pyodide = await loadPyodide({ indexURL: chrome.runtime.getURL("pyodide/") });
   window.pyodide = pyodide;
@@ -106,6 +109,12 @@ async function boot() {
 
   setStatus("Running main.py…");
   await pyodide.runPythonAsync(await fetchText("app/main.py"));
+
+  // Declarations only *declare*: this calls the functions whose @watch_for /
+  // @on_event match the page, and registers the page-side subscriptions.
+  await pyodide.runPythonAsync(
+    "import asyncio, pyodex_runtime; asyncio.ensure_future(pyodex_runtime.dispatch())"
+  );
   status?.classList.add("hidden");
 }
 

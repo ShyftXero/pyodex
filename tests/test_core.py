@@ -324,3 +324,24 @@ def test_urlmatch_renders_into_injector(tmp_path):
     _, js = _build(tmp_path, '[extension]\nname = "Site"\n', (
         "from pyodex_runtime import urlmatch\n@urlmatch(['127.0.0.1'])\ndef f(): ...\n"))
     assert "urlRulesMatch" in js and "127.0.0.1" in js
+
+
+def test_generated_js_is_syntactically_valid(tmp_path):
+    """A broken template must fail the build, not boot in a browser and fail silently.
+
+    This exists because a Python-style adjacent-string-literal slipped into
+    bootstrap.js once and produced a module that never executed — no console
+    error, just a permanently "Loading Python…" overlay.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("node"):
+        pytest.skip("node not available")
+
+    built, _ = _build(tmp_path, '[extension]\nname = "Syntax"\n')
+    for name in ("injector.js", "bootstrap.js"):
+        src = (built / name).read_text()
+        proc = subprocess.run(["node", "--input-type=module", "--check"], input=src,
+                              capture_output=True, text=True)
+        assert proc.returncode == 0, f"{name}: {proc.stderr.strip()[:400]}"

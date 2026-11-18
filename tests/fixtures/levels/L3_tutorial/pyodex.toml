@@ -1,0 +1,5 @@
+[extension]
+name = "L3 Tutorial"
+matches = ["<all_urls>"]
+http = false
+reap_hidden_after = 0

@@ -1,0 +1,4 @@
+[extension]
+name = "L2 Quickstart"
+matches = ["<all_urls>"]
+http = true

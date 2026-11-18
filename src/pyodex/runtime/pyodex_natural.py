@@ -69,7 +69,9 @@ def detect() -> dict[str, Any]:
         "pyodide": getattr(pyodide, "__version__", "?"),
         "python": sys.version.split()[0],
         "emscripten": platform.platform(),
-        "jspi": bool(can_run_sync and can_run_sync()),
+        # can_run_sync() is context-sensitive: it reads False inside a plain sync
+        # callback even when JSPI works elsewhere. Never downgrade a proven yes.
+        "jspi": bool(CAPS.get("jspi")) or bool(can_run_sync and can_run_sync()),
         "run_sync": run_sync is not None,
         "ffi": sorted(k for k in dir(ffi) if not k.startswith("_")),
         "websocket": hasattr(js, "WebSocket"),
@@ -108,13 +110,21 @@ def _can_import(mod: str) -> bool:
 
 
 def _socket_native() -> bool:
-    """True only if the stdlib socket can actually reach the network (Node with sockfs).
-    socket() construction succeeds everywhere; connect is the real test."""
+    """True only if the stdlib socket can actually reach the network.
+
+    Pyodide implements sockets for Node only (`useNodeSockFS()`, over `net`), and
+    a browser page cannot reach the network at all. Probing with connect_ex is
+    unreliable — it can report a refusal in Chrome and wrongly disable the shim —
+    so the environment decides first and the probe only confirms.
+    """
     import errno
     import socket
 
     if getattr(socket.socket, "__module__", "") == __name__:
         return False  # already shimmed
+    # No `process` (or a `window` present) means we are in a browser.
+    if not hasattr(js, "process") or hasattr(js, "window"):
+        return False
     try:
         s = socket.socket()
         s.settimeout(0.2)
@@ -176,6 +186,8 @@ class _ProxySocket:
         return u
 
     def connect(self, address: tuple[str, int]) -> None:
+        import time as _time
+
         host, port = address
         self._peer = (host, int(port))
         ws = js.WebSocket.new(self._url(host, int(port)))
@@ -184,9 +196,20 @@ class _ProxySocket:
         # event must not be mistaken for EOF on the new one.
         self._gen = getattr(self, "_gen", 0) + 1
         gen = self._gen
-        opened = js.Promise.new(create_proxy(lambda res, rej: self._wire(ws, res, rej, gen)))
+        state: dict[str, Any] = {"open": False, "error": None}
+        self._wire(ws, state, gen)
         self._ws = ws
-        _await(_with_timeout(opened, self._timeout))
+
+        # Poll instead of racing a promise: a race hangs forever under JSPI and
+        # silently ignores the socket timeout callers depend on.
+        deadline = None if self._timeout is None else _time.monotonic() + self._timeout
+        while not state["open"]:
+            if state["error"]:
+                raise ConnectionRefusedError(str(state["error"]))
+            if deadline is not None and _time.monotonic() > deadline:
+                self.close()
+                raise TimeoutError("timed out")
+            _time.sleep(0.004)
 
     def connect_ex(self, address: tuple[str, int]) -> int:
         try:
@@ -195,12 +218,12 @@ class _ProxySocket:
         except OSError as e:
             return e.errno or 111
 
-    def _wire(self, ws: Any, res: Any, rej: Any, gen: int) -> None:
+    def _wire(self, ws: Any, state: dict, gen: int) -> None:
         stale = lambda: gen != getattr(self, "_gen", 0)  # noqa: E731
 
         def on_open(_e: Any) -> None:
             if not stale():
-                res(True)
+                state["open"] = True
 
         def on_msg(e: Any) -> None:
             if stale():
@@ -215,8 +238,9 @@ class _ProxySocket:
                 return
             self._chunks.append(None)
             self._wake()
-            reason = getattr(e, "reason", "") or "closed"
-            rej(js.Error.new(f"connect failed: {reason}"))
+            if not state["open"]:
+                reason = getattr(e, "reason", "") or "closed"
+                state["error"] = f"connect failed: {reason}"
 
         for ev, fn in (("open", on_open), ("message", on_msg), ("close", on_close), ("error", on_close)):
             p = create_proxy(fn)
@@ -594,23 +618,54 @@ class persist:
 # --------------------------------------------------------------------------- #
 
 
+DEFAULT_INDEX = "https://pypi.org/simple/"
+
+
+def _verify_imports(packages: list[str]) -> None:
+    """micropip can report success and install nothing; make that loud.
+
+    Observed on Pyodide 314: without an explicit index_urls, install() returns
+    cleanly and leaves site-packages untouched — the failure then surfaces much
+    later as a confusing ModuleNotFoundError.
+    """
+    import importlib
+    import importlib.util
+    import re
+
+    importlib.invalidate_caches()
+    missing = []
+    for pkg in packages:
+        name = re.split(r"[<>=!~\[\s]", pkg, maxsplit=1)[0].replace("-", "_")
+        if not importlib.util.find_spec(name):
+            missing.append(pkg)
+    if missing:
+        raise RuntimeError(
+            f"micropip reported success but {', '.join(missing)} is not importable "
+            f"(installed from {DEFAULT_INDEX}); check the package name/tag or pass the module name")
+
+
 def pip_install(*packages: str) -> None:
     """Install packages from PyPI at runtime via micropip (pure wheels / Pyodide builds only)."""
     import micropip
 
-    p = micropip.install(list(packages))
+    p = micropip.install(list(packages), index_urls=[DEFAULT_INDEX])
     if can_run_sync():
         run_sync(p)
-    else:
-        import asyncio
-
-        asyncio.ensure_future(p)
+        _verify_imports(list(packages))
+        return
+    # Deferring silently would make the very next `import` fail with a confusing
+    # ModuleNotFoundError, so say what to do instead.
+    raise RuntimeError(
+        "pip_install() cannot block in this context; call "
+        "`await pyodex_natural.pip_install_async(...)` from async code instead")
 
 
 async def pip_install_async(*packages: str) -> None:
     import micropip
 
-    await micropip.install(list(packages))
+    # index_urls is required: without it micropip silently installs nothing.
+    await micropip.install(list(packages), index_urls=[DEFAULT_INDEX])
+    _verify_imports(list(packages))
 
 
 # --------------------------------------------------------------------------- #
@@ -641,9 +696,30 @@ def _install_console() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _loop_error(loop: Any, context: dict) -> None:
+    """Send unhandled asyncio task failures to the overlay error panel."""
+    import traceback as _tb
+
+    exc = context.get("exception")
+    text = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__)) if exc else str(context.get("message", "task error"))
+    try:
+        js.pyodexReportError(text)
+    except Exception:  # noqa: BLE001
+        try:
+            js.console.error(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def install(*, console: bool = True, persist_fs: bool = True) -> dict[str, Any]:
     """Apply all shims the runtime supports. Returns detected capabilities."""
     caps = detect()
+    try:
+        import asyncio as _aio
+
+        _aio.get_event_loop().set_exception_handler(_loop_error)
+    except Exception:  # noqa: BLE001
+        pass
     _install_socket()
     _install_ssl()
     _install_io()
