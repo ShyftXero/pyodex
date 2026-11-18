@@ -97,6 +97,55 @@ def on_load(fn: Callable) -> Callable:
 _LOAD_HOOKS: list[Any] = []
 
 
+class events:
+    """Names usable with @on_event. Values are stable strings, matched page-side."""
+
+    PAGE_LOAD = "page.load"
+    DOM_READY = "page.dom_ready"
+    NAVIGATE = "page.navigate"
+    CLICK = "page.click"
+    INPUT = "page.input"
+    SUBMIT = "page.submit"
+    FORM_FOUND = "page.form_found"
+    TAB_VISIBLE = "tab.visible"
+    TAB_HIDDEN = "tab.hidden"
+
+
+DECLARATIONS: dict[str, list] = {"watch_for": [], "on_event": []}
+
+
+def watch_for(selector: str | None = None, *, id: str | None = None, url: str | None = None) -> Callable:
+    """Declare that this app matters on pages containing `selector`.
+
+    The page uses this to decide whether to involve the interpreter at all, so
+    unrelated tabs stay free. The function runs when a match is first seen.
+    """
+    sel = selector or (f"#{id}" if id else None)
+    if not sel:
+        raise ValueError("watch_for needs a selector or id=")
+
+    def deco(fn: Callable) -> Callable:
+        DECLARATIONS["watch_for"].append({"selector": sel, "url": url, "fn": fn.__name__})
+        return fn
+
+    return deco
+
+
+def on_event(event: str, *, selector: str | None = None) -> Callable:
+    """Declare interest in a page event (`events.CLICK`, `events.NAVIGATE`, ...)."""
+
+    def deco(fn: Callable) -> Callable:
+        DECLARATIONS["on_event"].append({"event": str(event), "selector": selector, "fn": fn.__name__})
+        return fn
+
+    return deco
+
+
+def declarations() -> dict:
+    """Snapshot of what this app declared, for the host to route on."""
+    return {"watch_for": list(DECLARATIONS["watch_for"]), "on_event": list(DECLARATIONS["on_event"])}
+
+
 def want_boot(mode: str = "auto") -> None:
     """Ask the host page to boot (or stay) in `mode`.
 

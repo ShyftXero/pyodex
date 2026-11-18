@@ -203,3 +203,73 @@ def test_password_manager_example_resolves():
     assert cfg.boot == "trigger"
     assert cfg.triggers and cfg.triggers[0]["selector"] == "input[type=password]"
     assert cfg.reap_hidden_after == 0
+
+
+def test_declarations_extracted(tmp_path):
+    from pyodex.declarations import extract
+
+    f = tmp_path / "main.py"
+    f.write_text('''
+from pyodex_runtime import on_load, watch_for, on_event, events
+
+@on_load
+def begin(): ...
+
+@watch_for("input[type=password]")
+def a(): ...
+
+@watch_for(id="login")
+def b(): ...
+
+@on_event(events.CLICK, selector="#go")
+def c(): ...
+''')
+    d = extract([f])
+    assert d.on_load is True
+    assert {"selector": "input[type=password]"} in d.triggers
+    assert {"selector": "#login"} in d.triggers
+    assert {"event": "page.click", "selector": "#go"} in d.events
+    assert not d.problems
+
+
+def test_declarations_report_unparseable(tmp_path):
+    from pyodex.declarations import extract
+
+    f = tmp_path / "main.py"
+    f.write_text("@watch_for(SELECTOR_CONST)\ndef a(): ...\n")
+    d = extract([f])
+    assert d.triggers == [] and d.problems  # reported, never silently dropped
+
+
+def test_boot_inferred_from_watch_for(tmp_path):
+    """Declaring @watch_for is what sets trigger mode; no config needed."""
+    from pyodex.builder import resolve_project
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "Vault"\n')
+    (tmp_path / "main.py").write_text(
+        'from pyodex_runtime import watch_for\n@watch_for("input[type=password]")\ndef f(): ...\n')
+    cfg = resolve_project(tmp_path)[1]
+    assert cfg.boot == "trigger"
+    assert cfg.triggers == [{"selector": "input[type=password]"}]
+    assert cfg.declarations["on_load"] is False
+
+
+def test_explicit_boot_beats_declarations(tmp_path):
+    from pyodex.builder import resolve_project
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "V"\nboot = "auto"\n')
+    (tmp_path / "main.py").write_text(
+        'from pyodex_runtime import watch_for\n@watch_for("#x")\ndef f(): ...\n')
+    assert resolve_project(tmp_path)[1].boot == "auto"
+
+
+def test_password_manager_example_uses_decorators():
+    from pathlib import Path
+
+    from pyodex.builder import resolve_project
+
+    root = Path(__file__).resolve().parents[1] / "examples" / "password_manager"
+    cfg = resolve_project(root)[1]
+    assert cfg.boot == "trigger"  # inferred, not configured
+    assert cfg.triggers[0]["selector"] == "input[type=password]"
+    assert cfg.declarations["events"] == [{"event": "page.submit", "selector": "form"}]

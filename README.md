@@ -63,6 +63,28 @@ myext/
 3. `pyodex_runtime` (importable from `main.py`) gives you `Overlay`, `on`, `el`,
    `Page` (talk to host page), `WebSocketClient`, `TcpSocket`, `fetch_json`, `vendored`.
 
+## Declaring intent in Python
+
+The app says what it needs; the build works out how pages behave. No config
+required, and no executing app code at build time (extraction is static):
+
+```python
+from pyodex_runtime import on_load, watch_for, on_event, events, keep_alive
+
+@on_load                          # wants to run at page load
+def begin(): ...
+
+@watch_for("input[type=password]")  # this page matters -> boot on match
+def login_form_seen(): ...
+
+@on_event(events.SUBMIT, selector="form")   # react to page events
+def on_submit(payload): ...
+```
+
+`@watch_for` implies `boot = "trigger"`, `@on_load` implies `visible`, nothing
+declared means `user` (click to run). Explicit config still wins. Declarations
+that cannot be resolved statically are printed as warnings rather than skipped.
+
 ## Boot policy
 
 One Pyodide instance runs per tab, with its own heap. Booting every matching tab
@@ -129,6 +151,12 @@ Note the cost model honestly: any tool that touches a page's DOM needs an
 interpreter *in that page*, so per-tab memory is inherent for those pages — what
 triggers buy you is not paying it on the other 35 tabs. See
 `examples/password_manager` for this shape end to end.
+
+That residual per-page cost is temporary. The target architecture is **one
+interpreter shared by every tab**, living in an offscreen document, with a thin
+JS DOM agent per page — see [`docs/shared-engine.md`](docs/shared-engine.md) for
+the design, the migration plan, and the open questions (notably whether a
+synchronous DOM bridge is possible).
 
 ## Dependencies (PEP 723)
 

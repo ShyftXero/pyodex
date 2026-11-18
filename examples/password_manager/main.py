@@ -1,45 +1,45 @@
-"""Password-manager shape: always watching, but Python boots only when needed.
+"""Password-manager shape: watches every page, one interpreter, no habit changes.
 
-Two things make this work without paying for a Pyodide instance in all 40 tabs:
+Intent is declared in Python, not in config:
 
-  * `boot = "trigger"` in pyodex.toml: the content script watches the DOM and
-    starts the interpreter only on pages that contain a password field.
-  * `reap_hidden_after = 0`: once awake on a login page, this tab stays resident
-    so it can react while the user is in another tab/window.
+    @watch_for("input[type=password]")   -> this page matters, boot on match
+    @on_event(events.SUBMIT, ...)        -> tell me when the form is submitted
 
-The hot path (observing forms, showing an affordance) is plain JS. Python is
-reserved for what JS is bad at: parsing the vault, matching, generating fill.
+The page agent (plain JS, no wasm) evaluates those declarations. Unrelated tabs
+never involve the interpreter; a login page gets it with no click.
+
+Note: page-DOM work still needs an interpreter attached to that page. The shared
+engine (docs/shared-engine.md) is what removes the per-tab heap.
 """
 
-import json
+import asyncio
 
-from pyodex_runtime import Page, on, status
+from pyodex_runtime import Page, events, on_event, status, watch_for
 
-page = Page()  # host-page bridge (async DOM access)
+page = Page()
 
 
-async def find_login_fields():
-    return await page.query("input[type=password]")
+@watch_for("input[type=password]")
+def login_form_seen():
+    """Called the first time this page is found to contain a password field."""
+    asyncio.ensure_future(prepare())
+
+
+@on_event(events.SUBMIT, selector="form")
+def form_submitted(payload):
+    status("Vault: submission observed", error=False)
+
+
+async def prepare():
+    fields = await page.query("input[type=password]")
+    if not fields:
+        return
+    status(f"Vault ready: {len(fields)} login field(s)")
+    await fill("demo@example.com", "not-a-real-password")
 
 
 async def fill(username: str, password: str):
-    """Fill the first credential form and dispatch real input events."""
     users = await page.query("form input[name*=user], form input[type=email]")
     if users:
         await page.set_value("form input[name*=user], form input[type=email]", username)
     await page.set_value("input[type=password]", password)
-
-
-async def main():
-    fields = await find_login_fields()
-    if not fields:
-        return
-    status(f"Vault ready: {len(fields)} login field(s)")
-    # Demo only: a real vault would decrypt locally and never hardcode anything.
-    await fill("demo@example.com", "not-a-real-password")
-    status(None)
-
-
-import asyncio
-
-asyncio.ensure_future(main())
