@@ -624,9 +624,14 @@ DEFAULT_INDEX = "https://pypi.org/simple/"
 def _verify_imports(packages: list[str]) -> None:
     """micropip can report success and install nothing; make that loud.
 
-    Observed on Pyodide 314: without an explicit index_urls, install() returns
-    cleanly and leaves site-packages untouched — the failure then surfaces much
-    later as a confusing ModuleNotFoundError.
+    Observed on Pyodide 314.0.8 with micropip loaded from a local wheel (the
+    offline-bundle case): without an explicit index_urls, install() returns
+    cleanly and leaves site-packages untouched, so the failure surfaces later as
+    a confusing ModuleNotFoundError. Reported upstream:
+    https://github.com/pyodide/pyodide/issues/6569
+
+    Keep the explicit index_urls and this check even if that issue is fixed:
+    a silent no-op is worse than a slow path.
     """
     import importlib
     import importlib.util

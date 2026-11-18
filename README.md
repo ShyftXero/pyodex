@@ -249,7 +249,9 @@ a detected capability and leaves stdlib alone if unsupported.
 - **persistent cwd**: `/home/pyodide/data` on IndexedDB. `open('x','w')`
   survives reload. `pyodex_natural.save()` or `with persist():` flushes.
   Autosave every 2 s.
-- **pip_install("pkg")**: micropip at runtime (bundled).
+- **pip_install("pkg")**: micropip at runtime (bundled). We pass an explicit
+  index and verify the import afterwards, because micropip can otherwise return
+  successfully while installing nothing ([pyodide#6569](https://github.com/pyodide/pyodide/issues/6569)).
 - **print**: mirrored to the browser console as `[py] ...`.
 
 ```python
