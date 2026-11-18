@@ -61,6 +61,7 @@ class ExtConfig:
     # Declarative triggers: boot when the page matches, without user interaction.
     # Each entry: {"url"?: glob, "selector"?: css}. Both present -> both must match.
     triggers: list[dict] = field(default_factory=list)
+    declarations: dict = field(default_factory=dict)  # extracted @on_load/@watch_for/@on_event
 
     @property
     def slug(self) -> str:
@@ -117,19 +118,30 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
     )
 
 
-def _apply_on_load_hint(project: Path, cfg: ExtConfig, ext: dict) -> ExtConfig:
-    """If the entry script uses @on_load and no boot policy was set, boot when visible."""
-    if ext.get("boot") is not None or ext.get("lazy") is not None:
-        return cfg
-    entry = project / cfg.entry
-    try:
-        src = entry.read_text()
-    except OSError:
-        return cfg
-    if "@on_load" in src or "on_load(" in src:
-        cfg.boot = "visible"
-        print(f'boot: {entry.name} uses @on_load -> boot = "visible" (hidden tabs are released '
-              f"after {cfg.reap_hidden_after}s; set boot=\"auto\" to also run while hidden)")
+def _apply_declarations(project: Path, cfg: ExtConfig, ext: dict) -> ExtConfig:
+    """Derive boot policy from the app's own decorators when config is silent.
+
+    Python declares intent (``@on_load``, ``@watch_for``); the build turns that
+    into how the page behaves. Config still wins when set explicitly.
+    """
+    from .declarations import extract, summarise
+
+    paths = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    decls = extract([p for p in paths if p.is_file()])
+    cfg.declarations = decls.to_dict()
+    for problem in decls.problems:
+        print(f"warning: {problem}")
+
+    if not cfg.triggers and decls.triggers:
+        cfg.triggers = decls.triggers
+
+    if ext.get("boot") is None and ext.get("lazy") is None:
+        if decls.triggers:
+            cfg.boot = "trigger"
+        elif decls.on_load:
+            cfg.boot = "visible"
+    print(f"declarations: {summarise(decls)} -> boot = {cfg.boot!r}"
+          + (f", {len(cfg.triggers)} trigger(s)" if cfg.triggers else ""))
     return cfg
 
 
@@ -145,7 +157,7 @@ def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
             raise FileNotFoundError(f"no pyodex.toml in {target}")
         data = tomllib.loads(cfg_path.read_text())
         cfg = _config_from_data(data, default_name=target.name, default_entry="main.py")
-        return target, _apply_on_load_hint(target, cfg, data.get("extension", {}))
+        return target, _apply_declarations(target, cfg, data.get("extension", {}))
     if target.suffix == ".py":
         from .packages import read_pep723
 
@@ -154,7 +166,7 @@ def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
         # [tool.pyodex] is flat; [tool.pyodex.vendor] holds URL assets.
         data = {"extension": {k: v for k, v in tool.items() if k != "vendor"}, "vendor": tool.get("vendor", {})}
         cfg = _config_from_data(data, default_name=target.stem, default_entry=target.name)
-        return target.parent, _apply_on_load_hint(target.parent, cfg, data["extension"])
+        return target.parent, _apply_declarations(target.parent, cfg, data["extension"])
     raise FileNotFoundError(f"{target}: not a project dir or .py script")
 
 
