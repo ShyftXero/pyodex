@@ -192,6 +192,28 @@ type `launch` / `stop`).
 uv run pyodex build examples/fireworks
 ```
 
+## Publishing
+
+First upload creates the PyPI project; the name is claimed atomically.
+
+`uv` does not read `~/.pypirc` (twine's format). It checks, in order: `--token`,
+`UV_PUBLISH_TOKEN`, keyring, then `.netrc`. Configure `.netrc` once:
+
+```
+machine upload.pypi.org
+  login __token__
+  password pypi-AgEIcHlwaS5vcmc...
+```
+
+```
+chmod 600 ~/.netrc
+uv build && uv publish
+```
+
+CI uses trusted publishing (OIDC) instead — see `.github/workflows/publish.yml`.
+For a brand-new name, add a *pending publisher* on PyPI (Owner `ShyftXero`,
+repo `pyodex`, workflow `publish.yml`, environment `pypi`), then cut a release.
+
 ## CLI
 
 ```
