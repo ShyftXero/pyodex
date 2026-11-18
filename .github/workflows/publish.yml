@@ -23,5 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - run: uv run scripts/datever.py --write
       - run: uv build
       - run: uv publish --trusted-publishing always

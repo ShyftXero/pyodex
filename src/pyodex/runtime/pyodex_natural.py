@@ -73,6 +73,8 @@ def detect() -> dict[str, Any]:
         "run_sync": run_sync is not None,
         "ffi": sorted(k for k in dir(ffi) if not k.startswith("_")),
         "websocket": hasattr(js, "WebSocket"),
+        "webtransport": hasattr(js, "WebTransport"),
+        "direct_sockets": any(hasattr(js, n) for n in ("TCPSocket", "UDPSocket")),
         "idbfs": _has_fs("IDBFS"),
         "opfs": hasattr(js, "navigator") and hasattr(js.navigator, "storage"),
         "prompt": hasattr(js, "prompt"),
@@ -129,10 +131,22 @@ def _socket_native() -> bool:
 
 
 def _await(promise: Any) -> Any:
-    """Block on a JS promise. Needs JSPI; raises clear error otherwise."""
+    """Block on a JS promise. Needs JSPI; raises clear error otherwise.
+
+    Maps the JS timeout rejection onto `socket.timeout` so stdlib callers
+    (http.client, smtplib, redis-py) retry/raise the way they expect.
+    """
     if not (run_sync and can_run_sync()):
         raise RuntimeError("blocking socket needs JSPI (run_sync). Use pyodex_runtime.TcpSocket (async) instead.")
-    return run_sync(promise)
+    try:
+        return run_sync(promise)
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "timed out" in msg.lower():
+            raise TimeoutError("timed out") from None
+        if "refused" in msg.lower() or "failed" in msg.lower():
+            raise ConnectionRefusedError(msg) from None
+        raise OSError(msg) from None
 
 
 class _ProxySocket:
@@ -166,7 +180,11 @@ class _ProxySocket:
         self._peer = (host, int(port))
         ws = js.WebSocket.new(self._url(host, int(port)))
         ws.binaryType = "arraybuffer"
-        opened = js.Promise.new(create_proxy(lambda res, rej: self._wire(ws, res, rej)))
+        # Generation guard: a TLS upgrade reconnects, and the old socket's close
+        # event must not be mistaken for EOF on the new one.
+        self._gen = getattr(self, "_gen", 0) + 1
+        gen = self._gen
+        opened = js.Promise.new(create_proxy(lambda res, rej: self._wire(ws, res, rej, gen)))
         self._ws = ws
         _await(_with_timeout(opened, self._timeout))
 
@@ -177,17 +195,24 @@ class _ProxySocket:
         except OSError as e:
             return e.errno or 111
 
-    def _wire(self, ws: Any, res: Any, rej: Any) -> None:
+    def _wire(self, ws: Any, res: Any, rej: Any, gen: int) -> None:
+        stale = lambda: gen != getattr(self, "_gen", 0)  # noqa: E731
+
         def on_open(_e: Any) -> None:
-            res(True)
+            if not stale():
+                res(True)
 
         def on_msg(e: Any) -> None:
+            if stale():
+                return
             d = e.data
             b = d.encode() if isinstance(d, str) else bytes(js.Uint8Array.new(d).to_py())
             self._chunks.append(b)
             self._wake()
 
         def on_close(e: Any) -> None:
+            if stale():
+                return
             self._chunks.append(None)
             self._wake()
             reason = getattr(e, "reason", "") or "closed"
@@ -204,16 +229,34 @@ class _ProxySocket:
         self._waiters.clear()
 
     def _wait_data(self) -> None:
+        """Wait until a chunk arrives, honoring settimeout().
+
+        Polls with a yielding sleep rather than racing a promise: a promise race
+        can hang forever here, which is far worse than a slow wakeup, and it
+        silently ignored socket timeouts that stdlib callers rely on.
+        """
+        import time as _time
+
         if self._chunks:
             return
-        p = js.Promise.new(create_proxy(lambda res, rej: self._waiters.append(res)))
-        _await(_with_timeout(p, self._timeout))
+        deadline = None if self._timeout is None else _time.monotonic() + self._timeout
+        while not self._chunks:
+            if self._closed:
+                return
+            if deadline is None:
+                _time.sleep(0.004)
+                continue
+            left = deadline - _time.monotonic()
+            if left <= 0:
+                raise TimeoutError("timed out")
+            _time.sleep(min(0.004, left))
 
     # -- io ---------------------------------------------------------------- #
     def send(self, data: bytes, flags: int = 0) -> int:
         if self._closed or self._ws is None:
             raise OSError(9, "Bad file descriptor")
-        self._ws.send(js.Uint8Array.new(to_js(list(bytes(data)))))
+        # to_js(bytes) yields a Uint8Array; avoids a per-element Python list.
+        self._ws.send(to_js(bytes(data)))
         return len(data)
 
     def sendall(self, data: bytes, flags: int = 0) -> None:
@@ -238,13 +281,43 @@ class _ProxySocket:
         return len(data)
 
     def makefile(self, mode: str = "r", buffering: int = -1, **kw: Any) -> Any:
+        """Real file object over the socket: http.client and smtplib depend on this.
+
+        SocketIO provides readinto/write over recv_into/sendall; we wrap it so
+        readline() and iteration behave normally.
+        """
         import io
         import socket as _s
 
-        raw = _s.SocketIO(self, mode.replace("b", ""))  # type: ignore[arg-type]
+        raw = _s.SocketIO(self, "rb")  # binary raw layer is valid for both directions
+        reading, writing = "r" in mode or "+" in mode, "w" in mode or "a" in mode or "+" in mode
         if "b" in mode:
-            return io.BufferedReader(raw) if "r" in mode else io.BufferedWriter(raw)
-        return io.TextIOWrapper(io.BufferedRWPair(raw, raw), **kw)
+            buf: Any = raw
+            if buffering == 0:
+                return buf
+            if reading and writing:
+                buf = io.BufferedRWPair(raw, raw)
+            elif reading:
+                buf = io.BufferedReader(raw)
+            else:
+                buf = io.BufferedWriter(raw)
+            return buf
+        if reading and writing:
+            return io.TextIOWrapper(io.BufferedRWPair(raw, raw), **kw)
+        if reading:
+            return io.TextIOWrapper(io.BufferedReader(raw), **kw)
+        return io.TextIOWrapper(io.BufferedWriter(raw), **kw)
+
+    # CPython's socket.SocketIO (used by makefile) refcounts this way.
+    def _incr_socketios(self) -> None:
+        self._io_refs = getattr(self, "_io_refs", 0) + 1
+
+    def _decref_socketios(self) -> None:
+        self._io_refs = max(0, getattr(self, "_io_refs", 1) - 1)
+
+    # -- readiness (select) ------------------------------------------------ #
+    def _readable(self) -> bool:
+        return bool(self._buf or self._chunks)
 
     # -- misc -------------------------------------------------------------- #
     def settimeout(self, t: float | None) -> None:
@@ -290,8 +363,23 @@ class _ProxySocket:
 
     # ssl hook
     def _upgrade_tls(self, server_hostname: str | None = None) -> "_ProxySocket":
-        """Called before connect() by our ssl shim. Proxy terminates TLS."""
+        """Switch this socket to the proxy's /tls route (proxy terminates TLS).
+
+        stdlib order is create_connection() -> wrap_socket(), so the plain route
+        may already be open; reopening is required for TLS to reach the wire.
+        """
+        if self._tls:
+            return self
         self._tls = True
+        self._tls_host = server_hostname
+        if self._ws is not None and self._peer is not None:
+            peer = self._peer
+            self.close()
+            self._closed = False
+            self._ws = None
+            self._chunks.clear()
+            self._buf.clear()
+            self.connect(peer)
         return self
 
 
@@ -303,11 +391,38 @@ def _with_timeout(promise: Any, t: float | None) -> Any:
         lambda res, rej: js.setTimeout(create_proxy(lambda: rej(js.Error.new("timed out"))), ms)))]))
 
 
+def _install_select() -> None:
+    """select.select over proxy sockets. Polls at 5ms; enough for stdlib callers."""
+    import select as _select
+    import time as _time
+
+    def select(rlist: Any, wlist: Any, xlist: Any, timeout: float | None = None) -> tuple:
+        end = None if timeout is None else _time.monotonic() + timeout
+        rlist, wlist = list(rlist), list(wlist)
+        while True:
+            ready = [s for s in rlist if getattr(s, "_readable", lambda: False)()]
+            if ready:
+                return (ready, wlist, [])
+            if not rlist:
+                return ([], wlist, [])
+            if end is not None:
+                left = end - _time.monotonic()
+                if left <= 0:
+                    return ([], wlist, [])
+                _time.sleep(min(0.005, left))
+            else:
+                _time.sleep(0.005)
+
+    _select.select = select  # type: ignore[assignment]
+
+
 def _install_socket() -> None:
     import socket
 
     if CAPS.get("socket_native"):
         return
+    socket.error = OSError  # type: ignore[attr-defined]
+    socket.timeout = TimeoutError  # type: ignore[attr-defined]
     socket.socket = _ProxySocket  # type: ignore[misc]
     socket.SocketType = _ProxySocket  # type: ignore[misc]
 
@@ -325,6 +440,8 @@ def _install_socket() -> None:
 
     socket.getaddrinfo = getaddrinfo  # type: ignore[assignment]
     socket.gethostbyname = lambda h: h  # type: ignore[assignment]
+    socket.gethostbyname_ex = lambda h: (h, [], [h])  # type: ignore[assignment]
+    _install_select()
 
 
 def _install_ssl() -> None:
