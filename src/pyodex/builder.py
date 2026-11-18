@@ -24,7 +24,8 @@ from pathlib import Path
 
 from . import PYODIDE_VERSION
 from .deps import HTTP_SHIM_PACKAGES, PYODIDE_CORE_FILES, ensure_pyodide, ensure_url_asset
-from .packages import Pin, ensure_in_store, link_cow, lock, pyodide_constraints, script_dependencies
+from .packages import (Pin, abi_from_lock, ensure_in_store, link_cow, lock, pyodide_constraints,
+                       record_digests, script_dependencies, uv_platform, verify_against_lock)
 
 TEMPLATES = Path(__file__).parent / "templates"
 RUNTIME = Path(__file__).parent / "runtime"
@@ -44,7 +45,7 @@ class ExtConfig:
     pyodide_version: str = PYODIDE_VERSION
     pyodide_packages: list[str] = field(default_factory=list)  # extra pure-Python PyPI packages to bundle
     http: bool = True  # bundle requests/urllib shims (pyodide-http, requests, urllib3, ...)
-    host_permissions: list[str] = field(default_factory=lambda: ["<all_urls>"])  # cross-origin fetch
+    host_permissions: list[str] = field(default_factory=list)  # cross-origin fetch; defaults to `matches`
     url_filter: str = ""  # optional substring the page URL must contain
     icon: str = ""
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
@@ -71,7 +72,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         pyodide_version=ext.get("pyodide_version", PYODIDE_VERSION),
         pyodide_packages=ext.get("pyodide_packages", []),
         http=ext.get("http", True),
-        host_permissions=ext.get("host_permissions", ["<all_urls>"]),
+        host_permissions=ext.get("host_permissions", ext.get("matches", ["<all_urls>"])),
         url_filter=ext.get("url_filter", ""),
         icon=ext.get("icon", ""),
         overlay_css=ext.get("overlay_css", ""),
@@ -171,16 +172,22 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     reqs += [r for r in script_dependencies(project / cfg.entry) if r not in reqs]
     pyodide_lock = json.loads((pyo_src / "pyodide-lock.json").read_text())
     py_ver = pyodide_lock["info"]["python"].rsplit(".", 1)[0]  # "3.14.1" -> "3.14"
-    pins = lock(project / f"{cfg.slug}.pyodex.lock" if cfg.entry != "main.py" else project / "pyodex.lock",
-                reqs, py_ver, constraints=pyodide_constraints(pyodide_lock))
+    lock_path = project / f"{cfg.slug}.pyodex.lock" if cfg.entry != "main.py" else project / "pyodex.lock"
+    platform = uv_platform(abi_from_lock(pyodide_lock))
+    pins = lock(lock_path, reqs, py_ver, constraints=pyodide_constraints(pyodide_lock), platform=platform)
     from .compat import check_pins
 
     check_pins(pins, allow_bad=allow_bad)
-    wheel_names, methods = [], set()
+    wheel_names, methods, store_paths = [], set(), []
     for pin in pins:
         w = ensure_in_store(pin, pyodide_lock=pyodide_lock, pyodide_version=cfg.pyodide_version)
+        store_paths.append(w)
         methods.add(link_cow(w, wheels / w.name))
         wheel_names.append(w.name)
+    bad = verify_against_lock(lock_path, store_paths)
+    if bad:
+        raise RuntimeError("wheel digest mismatch vs lock (delete lock or run --refresh-lock):\n  " + "\n  ".join(bad))
+    record_digests(lock_path, store_paths)
     if pins:
         print(f"packages: {len(pins)} wheels linked ({', '.join(sorted(methods))})")
     # micropip ships with Pyodide; bundle so pip_install() works offline-at-build.

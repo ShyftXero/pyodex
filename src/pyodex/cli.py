@@ -73,6 +73,26 @@ def _cmd_compat(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_cache(args: argparse.Namespace) -> int:
+    from .deps import cache_dir
+    from .packages import prune_store, store_dir
+
+    if args.action == "dir":
+        print(cache_dir())
+        return 0
+    keep = set()
+    for lk in Path(".").rglob("*pyodex.lock"):
+        try:
+            keep |= {f"{p['name'].lower().replace('_','-')}=={p['version']}" for p in json.loads(lk.read_text())["pins"]}
+        except (json.JSONDecodeError, KeyError):
+            pass
+    removed = prune_store(keep=keep or None, dry=args.dry)
+    for r in removed:
+        print(("would remove " if args.dry else "removed ") + str(r.relative_to(store_dir())))
+    print(f"{len(removed)} entries, kept {len(keep)} (from lock files under cwd)")
+    return 0
+
+
 def _cmd_pyodide(args: argparse.Namespace) -> int:
     from . import pyodide_caps as pc
 
@@ -128,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--shipped", action="store_true", help="write results into the shipped registry")
     s.add_argument("--pyodide-version", default=PYODIDE_VERSION)
     s.set_defaults(fn=_cmd_compat)
+
+    s = sub.add_parser("cache", help="inspect / prune the wheel store")
+    s.add_argument("action", choices=["dir", "prune"])
+    s.add_argument("--dry", action="store_true")
+    s.set_defaults(fn=_cmd_cache)
 
     s = sub.add_parser("pyodide", help="probe / diff Pyodide runtime capabilities")
     s.add_argument("action", choices=["probe", "latest", "diff"])
