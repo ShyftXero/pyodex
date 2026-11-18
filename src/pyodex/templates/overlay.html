@@ -28,12 +28,39 @@
     }
     #pyodex-status.hidden { display: none; }
     #pyodex-status.error { background: #b91c1c; }
+    #pyodex-error {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      max-height: 45vh;
+      overflow: auto;
+      z-index: 2147483646;
+      pointer-events: auto;
+      margin: 0;
+      padding: 10px 12px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #fecaca;
+      background: rgba(12, 10, 9, 0.96);
+      border-top: 2px solid #b91c1c;
+      white-space: pre-wrap;
+      display: none;
+    }
+    #pyodex-error.show { display: block; }
+    #pyodex-error .pyodex-err-head {
+      display: flex; justify-content: space-between; gap: 12px;
+      font: 600 12px system-ui, sans-serif; color: #fff; margin-bottom: 6px;
+    }
+    #pyodex-error button {
+      pointer-events: auto; cursor: pointer; border: 1px solid #7f1d1d;
+      background: #450a0a; color: #fff; border-radius: 4px; padding: 2px 8px;
+      font: 600 11px system-ui, sans-serif;
+    }
     {{CSS}}
   </style>
 </head>
 <body>
 {{BODY}}
   <div id="pyodex-status">Loading Python…</div>
+  <pre id="pyodex-error" role="alert" aria-live="assertive"></pre>
 {{SCRIPTS}}
   <script type="module" src="bootstrap.js"></script>
 </body>
