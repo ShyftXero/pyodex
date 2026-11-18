@@ -393,6 +393,144 @@ class TcpSocket:
         self.ws.close()
 
 
+# --------------------------------------------------------------------------- #
+# WebTransport: QUIC streams + unreliable datagrams (no local proxy)
+# --------------------------------------------------------------------------- #
+
+
+class WebTransportError(RuntimeError):
+    """Raised when WebTransport is unavailable or a stream fails."""
+
+
+class WebTransportStream:
+    """A reliable, bidirectional QUIC stream from WebTransport."""
+
+    def __init__(self, raw: Any) -> None:
+        self.raw = raw
+        self._reader = raw.readable.getReader()
+        self._writer = raw.writable.getWriter()
+        self._eof = False
+
+    async def write(self, data: bytes) -> None:
+        await self._writer.write(to_js(bytes(data)))
+
+    async def read(self) -> bytes:
+        """Next chunk; b"" at end of stream."""
+        if self._eof:
+            return b""
+        res = await self._reader.read()
+        if res.done:
+            self._eof = True
+            return b""
+        return bytes(js.Uint8Array.new(res.value).to_py())
+
+    async def read_until(self, sep: bytes = b"\n", limit: int = 1 << 20) -> bytes:
+        buf = bytearray()
+        while sep not in buf:
+            if len(buf) > limit:
+                raise WebTransportError("read_until limit exceeded")
+            chunk = await self.read()
+            if not chunk:
+                break
+            buf.extend(chunk)
+        idx = buf.find(sep)
+        return bytes(buf[: idx + len(sep)]) if idx >= 0 else bytes(buf)
+
+    async def close(self) -> None:
+        try:
+            await self._writer.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def __aenter__(self) -> "WebTransportStream":
+        return self
+
+    async def __aexit__(self, *a: Any) -> None:
+        await self.close()
+
+
+class WebTransport:
+    """WebTransport client: QUIC streams plus unreliable datagrams.
+
+    Needs an HTTP/3 endpoint with a valid certificate. For local development,
+    pass `cert_hashes=[sha256_of_cert]` (Chrome allows short-lived self-signed
+    certs for WebTransport via serverCertificateHashes).
+
+        wt = await WebTransport.connect("https://localhost:4433/wt")
+        wt.send_datagram(b"tick")
+        print(await wt.recv_datagram())
+        async with wt.stream() as s:
+            s.write(b"hello")
+            print(await s.read())
+    """
+
+    def __init__(self, raw: Any) -> None:
+        self.raw = raw
+        self._dg_reader = raw.datagrams.readable.getReader() if raw.datagrams else None
+        self._dg_writer = raw.datagrams.writable.getWriter() if raw.datagrams else None
+        self._closed = False
+
+    @staticmethod
+    def available() -> bool:
+        return hasattr(js, "WebTransport")
+
+    @classmethod
+    async def connect(cls, url: str, *, cert_hashes: list[bytes] | None = None,
+                      timeout: float = 15.0) -> "WebTransport":
+        if not cls.available():
+            raise WebTransportError("WebTransport is not available in this browser")
+        opts = None
+        if cert_hashes:
+            opts = jsobj({"serverCertificateHashes": [
+                {"algorithm": "sha-256", "value": to_js(h)} for h in cert_hashes]})
+        raw = js.WebTransport.new(url, opts) if opts else js.WebTransport.new(url)
+        try:
+            await asyncio.wait_for(_awaitable(raw.ready), timeout)
+        except asyncio.TimeoutError:
+            raise WebTransportError(f"WebTransport handshake timed out: {url}") from None
+        return cls(raw)
+
+    # -- datagrams (unreliable, unordered) --------------------------------- #
+    def send_datagram(self, data: bytes) -> None:
+        if self._dg_writer is None:
+            raise WebTransportError("this transport has no datagram support")
+        # Fire and forget: write() returns a promise; schedule it on the loop.
+        asyncio.ensure_future(self._dg_writer.write(to_js(bytes(data))))
+
+    async def send_datagram_sync(self, data: bytes) -> None:
+        """Await the write (backpressure-aware)."""
+        if self._dg_writer is None:
+            raise WebTransportError("this transport has no datagram support")
+        await self._dg_writer.write(to_js(bytes(data)))
+
+    async def recv_datagram(self) -> bytes:
+        """Next datagram; b"" once closed."""
+        if self._dg_reader is None or self._closed:
+            return b""
+        res = await self._dg_reader.read()
+        if res.done:
+            self._closed = True
+            return b""
+        return bytes(js.Uint8Array.new(res.value).to_py())
+
+    # -- streams (reliable) ------------------------------------------------ #
+    async def stream(self) -> WebTransportStream:
+        raw = await self.raw.createBidirectionalStream()
+        return WebTransportStream(raw)
+
+    def close(self) -> None:
+        self._closed = True
+        try:
+            self.raw.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _awaitable(promise: Any) -> Any:
+    """Await a JS promise from Python (Pyodide turns promises into awaitables)."""
+    return await promise
+
+
 def vendored(name: str, *, default_export: bool = True) -> Any:
     """Return a global vendored JS library, unwrapping `.default` for UMD builds if present."""
     lib = getattr(js, name)

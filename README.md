@@ -153,15 +153,33 @@ Snapshot holds: JSPI, FS types, ffi surface, JS API keys, stdlib gaps, every
 shipped package version. `diff` lists added/removed/changed entries so new
 runtime features show up as a to-do for shims.
 
-## Raw TCP via proxy
+## Networking: what the browser actually allows
 
-Browsers block raw sockets. Run the bundled bridge:
+Python expects sockets; a browser page cannot open one. Chrome's options, and
+what each can reach:
+
+| Path | Bare TCP | Bare UDP | Usable from an MV3 extension? |
+|---|---|---|---|
+| `chrome.sockets.tcp/udp` | yes | yes | No — Chrome Apps only, removed in 2022 |
+| Direct Sockets (`TCPSocket`, `UDPSocket`) | yes | yes | No — Isolated Web Apps only, plus enterprise policy |
+| WebSocket | TCP-like, needs HTTP upgrade | no | yes |
+| WebTransport | streams over QUIC | datagrams | yes, if the server speaks HTTP/3 |
+| WebRTC data channel | no | UDP via ICE | yes, peer-to-peer only, needs signaling |
+| Native messaging host | via helper process | via helper | yes, but requires installing a native host |
+
+Pyodide does not change this: its socket support is Node-only
+(`useNodeSockFS()` over Node's `net`), so in a browser you always need a shim.
+`pyodex_natural` provides that shim on top of one of the transports below.
+
+Reaching real TCP/UDP would need Chromium to expose Direct Sockets to extension
+contexts. Today it does not: the API assumes a signed bundle and an enterprise
+allowlist (see [IWA](#isolated-web-apps-experimental) below).
+
+### Transport 1: local proxy (default)
 
 ```
 uv run proxy/python_websocket_proxy.py --port 1234 --allow localhost:*
 ```
-
-Then in the extension:
 
 ```python
 from pyodex_runtime import TcpSocket
@@ -170,9 +188,13 @@ sock.send(b"PING\r\n")
 print(await sock.recv_until(b"\n"))
 ```
 
-Routes: `ws://127.0.0.1:1234/` → `--target HOST:PORT`; `ws://.../tcp/HOST/PORT` and
-`ws://.../tls/HOST/PORT` (proxy opens TLS upstream) → dynamic, gated by `--allow` rules (`name`, glob, or CIDR; port `n`, `a-b`, `*`).
+Routes: `ws://127.0.0.1:1234/` → `--target HOST:PORT`; `ws://.../tcp/HOST/PORT`
+and `ws://.../tls/HOST/PORT` (proxy opens TLS upstream) → dynamic, gated by
+`--allow` rules (hostname, glob, or CIDR; port `n`, `a-b`, `*`).
 `--token X` requires `?token=X`. Binds `127.0.0.1` by default.
+
+With the proxy running, plain stdlib code works unchanged (`socket.create_connection`,
+`http.client`, `smtplib`, `redis-py`) — see `tests/e2e_natural.py`.
 
 Standalone binaries (haru-pack, thick tier, offline):
 
@@ -181,6 +203,62 @@ bash proxy/build_binaries.sh                 # host + windows-x86_64 -> dist/pro
 bash proxy/build_binaries.sh linux-aarch64   # explicit targets
 ./dist/proxy/python_websocket_proxy --port 1234 --allow localhost:*
 ```
+
+### Transport 2: WebTransport (UDP, no local helper)
+
+When you control the server, WebTransport gives you QUIC streams plus unreliable
+datagrams with no local process and no open port. Requires an HTTP/3 endpoint
+with a valid certificate.
+
+```python
+from pyodex_runtime import WebTransport
+wt = await WebTransport.connect("https://example.com:4433/wt")
+wt.send_datagram(b"ping")                    # unreliable
+print(await wt.recv_datagram())
+async with wt.stream() as s:                 # reliable, bidirectional
+    s.write(b"hello")
+    print(await s.read())
+```
+
+Check support at runtime: `window.pyodexCaps.webtransport`.
+
+### Transport 3: native messaging host
+
+For local services at the lowest latency, a native host is the sanctioned route:
+no open port, no WebSocket hop. The tradeoff is installation — a host manifest
+plus a registry key on Windows. Not bundled here.
+
+### Isolated Web Apps (experimental)
+
+An IWA is a signed web bundle (`isolated-app://`) that can use Direct Sockets,
+i.e. real TCP/UDP and raw listeners. It cannot inspect traffic in other tabs; it
+only sees what clients send to ports it binds.
+
+`pyodex` can package an extension as an IWA-shaped app and serve it for local
+sideloading:
+
+```
+uv run pyodex iwa build examples/fireworks     # dist/iwa/<slug>/ + instructions
+uv run pyodex iwa dev examples/fireworks       # HTTPS dev server for chrome://web-app-internals
+```
+
+Sideload with developer flags (Method 1): enable `#enable-isolated-web-apps` and
+`#enable-isolated-web-app-dev-mode`, open `chrome://web-app-internals`, and pick
+*Install IWA with Dev Mode Proxy* pointing at the `pyodex iwa dev` URL.
+
+Experimental by design: no signing, no update channel, no enterprise policy.
+An extension cannot reach Direct Sockets today; this target exists so the code
+path is ready if that changes, and so you can run it as a standalone IWA now.
+
+## Tests
+
+```
+uv run pytest -q                 # unit: pep723, allowlist, proxy routing, CoW link, caps diff
+uv run tests/e2e_natural.py      # e2e: real servers + proxy + Pyodide under Node
+```
+
+The e2e suite proves the socket shim against actual protocol clients: raw sockets,
+`select`, `http.client`, `smtplib`, `redis-py`, and proxy-terminated TLS.
 
 ## Example
 
@@ -221,6 +299,8 @@ pyodex init <dir> [--name N] [--match PATTERN ...]
 pyodex build <dir> [--out DIR]
 pyodex zip <dir> [--out FILE]
 pyodex fetch [--pyodide-version V] [--force]
+pyodex iwa build|dev <dir> [--out DIR] [--port N]
+pyodex cache dir|prune [--dry]
 pyodex compat test|list [PKG ...] [--top N] [--shipped] [--filter STATUS]
 pyodex pyodide probe|latest|diff [--version V] [OLD NEW]
 ```

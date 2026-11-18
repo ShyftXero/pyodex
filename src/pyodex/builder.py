@@ -34,7 +34,7 @@ RUNTIME = Path(__file__).parent / "runtime"
 @dataclass
 class ExtConfig:
     name: str
-    version: str = "0.1.0"
+    version: str = ""  # empty -> datever in Chrome form, stamped at build time
     description: str = ""
     matches: list[str] = field(default_factory=lambda: ["<all_urls>"])
     entry: str = "main.py"
@@ -61,7 +61,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
     ext = data.get("extension", {})
     return ExtConfig(
         name=ext.get("name", default_name),
-        version=ext.get("version", "0.1.0"),
+        version=ext.get("version", ""),
         description=ext.get("description", ""),
         matches=ext.get("matches", ["<all_urls>"]),
         entry=ext.get("entry", default_entry),
@@ -239,6 +239,11 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     for t in ("overlay.html", "bootstrap.js", "injector.js"):
         (out / t).write_text(_render((TEMPLATES / t).read_text(), ctx))
 
+    if not cfg.version:
+        # datever, in the dotted form Chrome accepts (max 4 parts, <= 65535 each)
+        from .version import chrome_version, datever as _datever
+
+        cfg.version = chrome_version(_datever())
     (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
     return out
 

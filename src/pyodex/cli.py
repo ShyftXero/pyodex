@@ -73,6 +73,19 @@ def _cmd_compat(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_iwa(args: argparse.Namespace) -> int:
+    from . import iwa
+
+    target = Path(args.dir).resolve()
+    if args.action == "build":
+        out = iwa.build_iwa(target, Path(args.out).resolve() if args.out else None)
+        print(f"built IWA at {out}")
+        print("serve it with: pyodex iwa dev " + str(target))
+        return 0
+    iwa.dev(target, port=args.port)
+    return 0
+
+
 def _cmd_cache(args: argparse.Namespace) -> int:
     from .deps import cache_dir
     from .packages import prune_store, store_dir
@@ -148,6 +161,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--shipped", action="store_true", help="write results into the shipped registry")
     s.add_argument("--pyodide-version", default=PYODIDE_VERSION)
     s.set_defaults(fn=_cmd_compat)
+
+    s = sub.add_parser("iwa", help="package/serve an Isolated Web App (experimental)")
+    s.add_argument("action", choices=["build", "dev"])
+    s.add_argument("dir")
+    s.add_argument("--out")
+    s.add_argument("--port", type=int, default=0, help="for dev: HTTPS port (default: random)")
+    s.set_defaults(fn=_cmd_iwa)
 
     s = sub.add_parser("cache", help="inspect / prune the wheel store")
     s.add_argument("action", choices=["dir", "prune"])
