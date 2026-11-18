@@ -1,0 +1,13 @@
+[extension]
+name = "Pyodex Vault"
+version = ""
+description = "Watches every page for login forms and offers to fill them."
+matches = ["<all_urls>"]
+boot = "trigger"
+# Monitoring is cheap JS; Python only boots on pages that actually have a password field.
+triggers = [
+  { selector = "input[type=password]" },
+  { selector = "form input[name*=user]", url = "*/login*" },
+]
+reap_hidden_after = 0   # stay resident: this tool must react while hidden
+http = true

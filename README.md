@@ -71,10 +71,11 @@ project asks otherwise.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `boot` | `"user"` | `user`: launcher button, boot on click. `visible`: boot when the tab is visible. `auto`: boot on every page load. |
+| `boot` | `"user"` | `user`: launcher button, boot on click. `visible`: boot when the tab is visible. `auto`: boot on every page load. `trigger`: boot when the page matches a declared condition. |
+| `triggers` | `[]` | `trigger` mode only: `[{ url = "*/login*", selector = "input[type=password]" }]`. Both keys optional; both must match if both given. |
 | `idle_timeout` | `600` | `user` mode: seconds without activity before the interpreter is freed. |
 | `reap_hidden_after` | `300` | `visible`/`auto`: seconds hidden before the interpreter is freed, and re-booted when the tab returns. |
-| `max_live` | `0` | Cap on interpreters across all tabs. Tabs over the cap fall back to click-to-run instead of refusing. |
+| `max_live` | `0` | Cap on automatic boots (`visible`/`auto`) across tabs. Triggered and user-initiated boots are exempt — a page that needs the tool gets it. |
 
 Declaring load-time work is the sanctioned way to change the default:
 
@@ -98,6 +99,36 @@ release()              # done: free this tab's interpreter now
 ```
 
 `lazy = true|false` is still accepted as an alias for `boot = "user"|"auto"`.
+
+### Tools that must watch every page
+
+A password manager cannot wait for a click, but it also should not own a Python
+interpreter in every tab. Split the two concerns: keep the *watching* in the
+content script, and boot Python only when there is something to do.
+
+```toml
+[extension]
+boot = "trigger"
+triggers = [{ selector = "input[type=password]" }]
+reap_hidden_after = 0     # once awake here, stay awake while hidden
+```
+
+```python
+from pyodex_runtime import on_load, keep_alive, Page
+
+@on_load
+def start():
+    keep_alive(600)       # don't get reaped mid-session
+    ...                   # read vault, fill the form via Page()
+```
+
+The hot loop (DOM mutations, showing an affordance) stays in JS; Python handles
+vault parsing, matching, and filling. Pages with no matching trigger cost nothing.
+
+Note the cost model honestly: any tool that touches a page's DOM needs an
+interpreter *in that page*, so per-tab memory is inherent for those pages — what
+triggers buy you is not paying it on the other 35 tabs. See
+`examples/password_manager` for this shape end to end.
 
 ## Dependencies (PEP 723)
 

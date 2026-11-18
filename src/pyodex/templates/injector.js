@@ -13,6 +13,7 @@
   const IDLE_MS = {{IDLE_TIMEOUT_MS}};
   const REAP_HIDDEN_MS = {{REAP_HIDDEN_MS}};
   const MAX_LIVE = {{MAX_LIVE}};
+  const TRIGGERS = {{TRIGGERS}};   // declarative boot conditions: [{url?, selector?}]
   const LABEL = {{LABEL}};
   const RANK = { user: 0, visible: 1, auto: 2 };
 
@@ -256,6 +257,13 @@
 
     if (msg.type === "page.heartbeat") {
       resetIdle();
+    } else if (msg.type === "page.keepalive") {
+      // Python asked to stay resident for N ms (long task, open connection).
+      const ms = Number(msg.payload) || 0;
+      if (ms > 0) {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(teardown, ms);
+      }
     } else if (msg.type === "page.info") {
       iframe.contentWindow.postMessage(
         { pyodex: true, type: "page.info", id: msg.id, payload: { url: location.href, title: document.title } },
@@ -288,18 +296,70 @@
     }
   });
 
+  // ---- declarative triggers -------------------------------------------- //
+  // Lets a tool that must react on every page (a password manager watching for
+  // login forms) boot Python without a click, while pages that match nothing
+  // still cost nothing.
+  function globMatch(haystack, pattern) {
+    if (!pattern) return true;
+    if (!pattern.includes("*")) return haystack.toLowerCase().includes(pattern.toLowerCase());
+    const re = new RegExp("^" + pattern.split("*").map((p) => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "i");
+    return re.test(haystack);
+  }
+
+  function triggerMatched() {
+    if (!TRIGGERS.length) return false;
+    for (const t of TRIGGERS) {
+      if (!globMatch(location.href, t.url)) continue;
+      if (t.selector && !document.querySelector(t.selector)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  let triggerObserver = null;
+
+  function watchTriggers() {
+    if (triggerMatched()) {
+      boot();
+      return;
+    }
+    let queued = false;
+    const check = () => {
+      queued = false;
+      if (iframe) return;
+      if (triggerMatched()) {
+        triggerObserver && triggerObserver.disconnect();
+        boot();
+      }
+    };
+    triggerObserver = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      setTimeout(check, 250); // coalesce DOM churn
+    });
+    triggerObserver.observe(document.documentElement, { childList: true, subtree: true });
+    showLauncher(); // manual escape hatch while nothing matches
+  }
+
   // ---- start ------------------------------------------------------------ //
   async function start() {
     if (mode === "user") {
       showLauncher();
       return;
     }
+    if (mode === "trigger") {
+      watchTriggers();
+      return;
+    }
     if (mode === "visible" && document.visibilityState !== "visible") {
       showLauncher(); // boots when the tab becomes visible
       return;
     }
-    if (!(await budgetOk())) {
-      showLauncher(); // over budget: degrade to click-to-run instead of refusing
+    if (mode !== "trigger" && !(await budgetOk())) {
+      // Over budget applies to automatic boots only; a trigger means the page
+      // actually needs us, so it is not subject to the cap.
+      showLauncher();
       return;
     }
     if (!iframe) boot();

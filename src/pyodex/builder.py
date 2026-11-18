@@ -54,10 +54,13 @@ class ExtConfig:
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
-    boot: str = "user"
+    boot: str = "user"  # "user" | "visible" | "auto" | "trigger"
     idle_timeout: int = 600  # "user" mode: seconds of inactivity before freeing the interpreter
     reap_hidden_after: int = 300  # "visible"/"auto": seconds hidden before freeing it (0 = never)
-    max_live: int = 0  # cap on interpreters across all tabs (0 = unlimited); extra tabs fall back to "user"
+    max_live: int = 0  # cap for automatic boots (visible/auto) only; 0 = unlimited
+    # Declarative triggers: boot when the page matches, without user interaction.
+    # Each entry: {"url"?: glob, "selector"?: css}. Both present -> both must match.
+    triggers: list[dict] = field(default_factory=list)
 
     @property
     def slug(self) -> str:
@@ -80,8 +83,8 @@ def _boot_mode(ext: dict, entry_source: str = "") -> str:
                   "(bounded by reap_hidden_after)")
             return "visible"
         return "user"
-    if mode not in ("user", "visible", "auto"):
-        raise ValueError(f"boot must be user|visible|auto, got {mode!r}")
+    if mode not in ("user", "visible", "auto", "trigger"):
+        raise ValueError(f"boot must be user|visible|auto|trigger, got {mode!r}")
     return mode
 
 
@@ -110,6 +113,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
         max_live=ext.get("max_live", 0),
+        triggers=ext.get("triggers", []),
     )
 
 
@@ -290,6 +294,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
         "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
         "MAX_LIVE": str(int(cfg.max_live)),
+        "TRIGGERS": json.dumps(cfg.triggers),
     }
     for t in ("overlay.html", "bootstrap.js", "injector.js"):
         (out / t).write_text(_render((TEMPLATES / t).read_text(), ctx))

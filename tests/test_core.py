@@ -169,3 +169,37 @@ def test_max_live_and_reap_hidden_render(tmp_path):
     assert "const MAX_LIVE = 4;" in js
     assert "const REAP_HIDDEN_MS = 60000;" in js
     assert 'const CEILING = "visible";' in js
+
+
+def test_trigger_mode_renders(tmp_path):
+    """A watcher tool boots on match, not on click, and is exempt from the cap."""
+    _, js = _build(tmp_path, '''[extension]
+name = "Vault"
+boot = "trigger"
+triggers = [{ selector = "input[type=password]" }]
+''')
+    assert 'const CEILING = "trigger";' in js
+    assert "input[type=password]" in js
+    assert "watchTriggers" in js and "MutationObserver" in js
+    # trigger boots are demand-driven, so the max_live gate must not apply
+    assert 'mode !== "trigger" && !(await budgetOk())' in js
+
+
+def test_keepalive_and_release_api_exist():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "pyodex" / "runtime" / "pyodex_runtime.py").read_text()
+    for name in ("def keep_alive(", "def release(", "def want_boot(", "def on_load("):
+        assert name in src
+
+
+def test_password_manager_example_resolves():
+    from pathlib import Path
+
+    from pyodex.builder import resolve_project
+
+    root = Path(__file__).resolve().parents[1] / "examples" / "password_manager"
+    cfg = resolve_project(root)[1]
+    assert cfg.boot == "trigger"
+    assert cfg.triggers and cfg.triggers[0]["selector"] == "input[type=password]"
+    assert cfg.reap_hidden_after == 0
