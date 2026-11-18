@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{NAME}}</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      pointer-events: none;
+    }
+    #pyext-status {
+      position: fixed;
+      bottom: 8px;
+      right: 8px;
+      z-index: 2147483647;
+      font: 11px/1.3 system-ui, sans-serif;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 4px 8px;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0.9;
+    }
+    #pyext-status.hidden { display: none; }
+    #pyext-status.error { background: #b91c1c; }
+    {{CSS}}
+  </style>
+</head>
+<body>
+{{BODY}}
+  <div id="pyext-status">Loading Python…</div>
+{{SCRIPTS}}
+  <script type="module" src="bootstrap.js"></script>
+</body>
+</html>

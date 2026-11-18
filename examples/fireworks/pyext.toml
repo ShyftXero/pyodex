@@ -1,0 +1,13 @@
+[extension]
+name = "Shyft Python Fireworks"
+version = "1.0.0"
+description = "Pyodide-powered fireworks button on any page whose URL contains 'shyft'."
+matches = ["<all_urls>"]
+url_filter = "shyft"
+entry = "main.py"
+scripts = ["fireworks.js"]
+http = true
+host_permissions = ["<all_urls>"]
+
+[vendor]
+"fireworks.js" = "https://cdn.jsdelivr.net/npm/fireworks-js@2.10.8/dist/index.umd.js"

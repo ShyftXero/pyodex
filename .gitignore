@@ -1,0 +1,7 @@
+.venv/
+dist/
+*.zip
+__pycache__/
+.pyext-cache/
+node_modules/
+*.pyext.lock.tmp

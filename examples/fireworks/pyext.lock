@@ -1,0 +1,39 @@
+{
+  "hash": "60e00e4b02eca10a",
+  "python": "3.14",
+  "platform": "wasm32-pyodide2025",
+  "requirements": [
+    "pyodide-http",
+    "requests",
+    "urllib3",
+    "charset-normalizer",
+    "idna",
+    "certifi"
+  ],
+  "pins": [
+    {
+      "name": "certifi",
+      "version": "2026.4.22"
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.4.7"
+    },
+    {
+      "name": "idna",
+      "version": "3.11"
+    },
+    {
+      "name": "pyodide-http",
+      "version": "0.2.2"
+    },
+    {
+      "name": "requests",
+      "version": "2.33.1"
+    },
+    {
+      "name": "urllib3",
+      "version": "2.6.3"
+    }
+  ]
+}

@@ -1,0 +1,442 @@
+{
+ "aiobotocore": {
+  "status": "import-only",
+  "version": "3.8.0",
+  "reason": "imports; no functional probe defined",
+  "pyodide": "314.0.8",
+  "tested": 1794941456,
+  "source": "test"
+ },
+ "aiohttp": {
+  "status": "bad",
+  "version": "3.13.5",
+  "reason": "probe:         \"sock_connect() is not available in browser environments due to restricted raw socket access.\" |     ) from None | NotImplementedError: sock_connect() is not available in browser environments due to restricted raw socket access.",
+  "pyodide": "314.0.8",
+  "tested": 1794941435,
+  "source": "test"
+ },
+ "annotated-types": {
+  "status": "good",
+  "version": "0.7.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941271,
+  "source": "test"
+ },
+ "anyio": {
+  "status": "good",
+  "version": "4.13.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941266,
+  "source": "test"
+ },
+ "attrs": {
+  "status": "good",
+  "version": "26.1.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941298,
+  "source": "test"
+ },
+ "boto3": {
+  "status": "good",
+  "version": "1.44.4",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941155,
+  "source": "test"
+ },
+ "botocore": {
+  "status": "good",
+  "version": "1.44.4",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941258,
+  "source": "test"
+ },
+ "certifi": {
+  "status": "good",
+  "version": "2026.04.22",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941171,
+  "source": "test"
+ },
+ "cffi": {
+  "status": "good",
+  "version": "2.0.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941201,
+  "source": "test"
+ },
+ "charset-normalizer": {
+  "status": "good",
+  "version": "3.4.7",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941185,
+  "source": "test"
+ },
+ "click": {
+  "status": "good",
+  "version": "8.3.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941248,
+  "source": "test"
+ },
+ "cryptography": {
+  "status": "good",
+  "version": "47.0.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941196,
+  "source": "test"
+ },
+ "filelock": {
+  "status": "good",
+  "version": "4.2.11",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941408,
+  "source": "test"
+ },
+ "fsspec": {
+  "status": "good",
+  "version": "2026.3.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941398,
+  "source": "test"
+ },
+ "h11": {
+  "status": "good",
+  "version": "0.16.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941293,
+  "source": "test"
+ },
+ "httpcore": {
+  "status": "good",
+  "version": "1.0.9",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941313,
+  "source": "test"
+ },
+ "httpx": {
+  "status": "good",
+  "version": "0.28.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941308,
+  "source": "test"
+ },
+ "idna": {
+  "status": "good",
+  "version": "3.11",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941175,
+  "source": "test"
+ },
+ "iniconfig": {
+  "status": "good",
+  "version": "2.3.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941284,
+  "source": "test"
+ },
+ "jinja2": {
+  "status": "good",
+  "version": "3.1.6",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941340,
+  "source": "test"
+ },
+ "jmespath": {
+  "status": "good",
+  "version": "1.1.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941413,
+  "source": "test"
+ },
+ "jsonschema": {
+  "status": "good",
+  "version": "4.26.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941403,
+  "source": "test"
+ },
+ "markupsafe": {
+  "status": "good",
+  "version": "3.0.3",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941303,
+  "source": "test"
+ },
+ "numpy": {
+  "status": "good",
+  "version": "2.4.6",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941252,
+  "source": "test"
+ },
+ "opentelemetry-api": {
+  "status": "good",
+  "version": "1.45.2",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941369,
+  "source": "test"
+ },
+ "packaging": {
+  "status": "good",
+  "version": "26.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941163,
+  "source": "test"
+ },
+ "pandas": {
+  "status": "good",
+  "version": "3.0.2",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941345,
+  "source": "test"
+ },
+ "paramiko": {
+  "status": "bad",
+  "version": "5.1.0",
+  "reason": "probe:   File \"/lib/python3.14/site-packages/paramiko/client.py\", line 387, in connect |     raise NoValidConnectionsError(errors) | paramiko.ssh_exception.NoValidConnectionsError: [Errno None] Unable to connect to port 1 on 127.0.0.1",
+  "pyodide": "314.0.8",
+  "tested": 1794941449,
+  "source": "test"
+ },
+ "pathspec": {
+  "status": "good",
+  "version": "1.1.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941390,
+  "source": "test"
+ },
+ "pillow": {
+  "status": "good",
+  "version": "12.2.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941379,
+  "source": "test"
+ },
+ "platformdirs": {
+  "status": "good",
+  "version": "4.9.4",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941374,
+  "source": "test"
+ },
+ "pluggy": {
+  "status": "good",
+  "version": "1.6.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941205,
+  "source": "test"
+ },
+ "protobuf": {
+  "status": "good",
+  "version": "7.34.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941325,
+  "source": "test"
+ },
+ "psycopg2": {
+  "status": "bad",
+  "version": "",
+  "reason": "wheel: psycopg2==2.9.13: no Pyodide-compatible wheel on PyPI",
+  "pyodide": "314.0.8",
+  "tested": 1794941441,
+  "source": "test"
+ },
+ "pycparser": {
+  "status": "good",
+  "version": "3.00",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941214,
+  "source": "test"
+ },
+ "pydantic": {
+  "status": "good",
+  "version": "2.12.5",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941237,
+  "source": "test"
+ },
+ "pydantic-core": {
+  "status": "import-only",
+  "version": "2.41.5",
+  "reason": "imports; no functional probe defined",
+  "pyodide": "314.0.8",
+  "tested": 1794941243,
+  "source": "test"
+ },
+ "pygments": {
+  "status": "good",
+  "version": "2.20.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941218,
+  "source": "test"
+ },
+ "pyjwt": {
+  "status": "good",
+  "version": "2.15.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941335,
+  "source": "test"
+ },
+ "pymongo": {
+  "status": "bad",
+  "version": "4.16.0",
+  "reason": "probe:                            daemon=self.daemon) |                            ^^^^^^^^^^^^^^^^^^^ | RuntimeError: can't start new thread",
+  "pyodide": "314.0.8",
+  "tested": 1794941441,
+  "source": "test"
+ },
+ "pytest": {
+  "status": "good",
+  "version": "9.0.2",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941275,
+  "source": "test"
+ },
+ "python-dateutil": {
+  "status": "good",
+  "version": "2.9.0.post0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941223,
+  "source": "test"
+ },
+ "python-dotenv": {
+  "status": "good",
+  "version": "1.2.4",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941331,
+  "source": "test"
+ },
+ "pyyaml": {
+  "status": "good",
+  "version": "6.0.3",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941210,
+  "source": "test"
+ },
+ "redis": {
+  "status": "bad",
+  "version": "8.1.0",
+  "reason": "probe:   File \"/lib/python3.14/site-packages/redis/connection.py\", line 1077, in connect_check_health |     raise e | redis.exceptions.ConnectionError: Error 23 connecting to 127.0.0.1:1. Host is unreachable.",
+  "pyodide": "314.0.8",
+  "tested": 1794941425,
+  "source": "test"
+ },
+ "requests": {
+  "status": "good",
+  "version": "2.33.1",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941189,
+  "source": "test"
+ },
+ "rpds-py": {
+  "status": "good",
+  "version": "0.30.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941394,
+  "source": "test"
+ },
+ "s3transfer": {
+  "status": "good",
+  "version": "0.19.3",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941318,
+  "source": "test"
+ },
+ "setuptools": {
+  "status": "import-only",
+  "version": "82.0.1",
+  "reason": "imports; no functional probe defined",
+  "pyodide": "314.0.8",
+  "tested": 1794941231,
+  "source": "test"
+ },
+ "six": {
+  "status": "good",
+  "version": "1.17.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941227,
+  "source": "test"
+ },
+ "starlette": {
+  "status": "good",
+  "version": "1.0.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941364,
+  "source": "test"
+ },
+ "typing-extensions": {
+  "status": "good",
+  "version": "4.15.0",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941167,
+  "source": "test"
+ },
+ "typing-inspection": {
+  "status": "import-only",
+  "version": "0.4.2",
+  "reason": "imports; no functional probe defined",
+  "pyodide": "314.0.8",
+  "tested": 1794941288,
+  "source": "test"
+ },
+ "urllib3": {
+  "status": "good",
+  "version": "2.6.3",
+  "reason": "",
+  "pyodide": "314.0.8",
+  "tested": 1794941180,
+  "source": "test"
+ },
+ "uvicorn": {
+  "status": "bad",
+  "version": "0.54.0",
+  "reason": "probe:         \"create_server() is not available in browser environments due to restricted raw socket access.\" |     ) | NotImplementedError: create_server() is not available in browser environments due to restricted raw socket access.",
+  "pyodide": "314.0.8",
+  "tested": 1794941384,
+  "source": "test"
+ }
+}
