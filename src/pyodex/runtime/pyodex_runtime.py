@@ -108,6 +108,15 @@ def want_boot(mode: str = "auto") -> None:
     _post("page.boot", mode)
 
 
+def keep_alive(seconds: float = 300) -> None:
+    """Ask the host to keep this interpreter resident for `seconds`.
+
+    Use before long work (a big fetch, an open socket) so idle reaping cannot
+    tear the interpreter down mid-flight. Re-call to extend.
+    """
+    _post("page.keepalive", int(max(1.0, float(seconds)) * 1000))
+
+
 def release() -> None:
     """Free this tab's interpreter now (e.g. the work is done). Reload state is lost."""
     _post("page.release")
