@@ -1,0 +1,21 @@
+name: chrome-harness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group dev
+      - run: uv run pytest -q
+      # Bundled Chromium is required: stable Chrome no longer honours
+      # --load-extension from the command line.
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run tests/chrome_harness.py --jobs 4

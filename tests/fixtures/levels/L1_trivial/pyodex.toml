@@ -1,0 +1,4 @@
+[extension]
+name = "L1 Trivial"
+matches = ["<all_urls>"]
+http = false

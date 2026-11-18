@@ -78,6 +78,20 @@ def status(text: str | None, error: bool = False) -> None:
         s.classList.remove("error")
 
 
+def save() -> None:
+    """Flush the persistent data dir (IndexedDB). Re-exported from pyodex_natural."""
+    import pyodex_natural
+
+    pyodex_natural.save()
+
+
+def pip_install(*packages: str) -> None:
+    """Install packages at runtime via micropip. Re-exported from pyodex_natural."""
+    import pyodex_natural
+
+    pyodex_natural.pip_install(*packages)
+
+
 def _post(type_: str, payload: Any = None) -> None:
     window.parent.postMessage(jsobj({"pyodex": True, "type": type_, "payload": payload}), "*")
 
@@ -132,7 +146,7 @@ def urlmatch(patterns: str | list[str]) -> Callable:
         raise ValueError("urlmatch needs at least one pattern")
 
     def deco(fn: Callable) -> Callable:
-        DECLARATIONS["urlmatch"].append({"patterns": plist, "fn": fn.__name__})
+        DECLARATIONS["urlmatch"].append({"patterns": plist, "fn": fn.__name__, "callable": fn})
         return fn
 
     return deco
@@ -149,7 +163,7 @@ def watch_for(selector: str | None = None, *, id: str | None = None, url: str | 
         raise ValueError("watch_for needs a selector or id=")
 
     def deco(fn: Callable) -> Callable:
-        DECLARATIONS["watch_for"].append({"selector": sel, "url": url, "fn": fn.__name__})
+        DECLARATIONS["watch_for"].append({"selector": sel, "url": url, "fn": fn.__name__, "callable": fn})
         return fn
 
     return deco
@@ -159,10 +173,143 @@ def on_event(event: str, *, selector: str | None = None) -> Callable:
     """Declare interest in a page event (`events.CLICK`, `events.NAVIGATE`, ...)."""
 
     def deco(fn: Callable) -> Callable:
-        DECLARATIONS["on_event"].append({"event": str(event), "selector": selector, "fn": fn.__name__})
+        DECLARATIONS["on_event"].append(
+            {"event": str(event), "selector": selector, "fn": fn.__name__, "callable": fn})
         return fn
 
     return deco
+
+
+def _url_allows(patterns: list[str], url: str) -> bool:
+    """Match a URL against raw @urlmatch patterns (mirrors build-time classification)."""
+    import fnmatch
+    import re as _re
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(url).hostname or "").lower()
+    for raw in patterns:
+        pat = str(raw).strip()
+        if pat.startswith("re:"):
+            if _re.search(pat[3:], url):
+                return True
+            continue
+        if any(ch in "?()[]|^$\\+" for ch in pat):
+            try:
+                if _re.search(pat, url):
+                    return True
+            except _re.error:
+                pass
+            continue
+        if "://" in pat:
+            if "*" in pat:
+                rx = "^" + "".join(".*" if c == "*" else ("\\" + c if c in ".+?^${}()|[]\\" else c)
+                                   for c in pat) + "$"
+                if _re.match(rx, url, _re.I):
+                    return True
+            elif url.lower().startswith(pat.lower()):
+                return True
+            continue
+        p = pat.lower()
+        if p == "*":
+            return True
+        if p.startswith("*."):
+            base = p[2:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif fnmatch.fnmatch(host, p):
+            return True
+    return False
+
+
+_active_page: "Page | None" = None
+
+
+def _report_exception(text: str) -> None:
+    """Send a Python traceback to the overlay's error panel."""
+    try:
+        js.pyodexReportError(text)
+    except Exception:  # noqa: BLE001
+        try:
+            js.console.error(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _task_done(task: Any) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    import traceback as _tb
+
+    _report_exception("".join(_tb.format_exception(type(exc), exc, exc.__traceback__)))
+
+
+def _invoke(fn: Callable, *args: Any) -> None:
+    """Call a declared function, surfacing failures from async work.
+
+    A coroutine scheduled with ensure_future dies silently otherwise: it is not a
+    JS unhandled rejection and not a window error, so nothing reaches the panel.
+    """
+    try:
+        result = fn(*args)
+    except Exception as e:  # noqa: BLE001
+        import traceback as _tb
+
+        _report_exception("".join(_tb.format_exception(type(e), e, e.__traceback__)))
+        return
+    if asyncio.iscoroutine(result):
+        task = asyncio.ensure_future(result)
+        task.add_done_callback(_task_done)
+
+
+async def dispatch() -> dict:
+    """Call the functions whose declarations match this page.
+
+    Declaring `@watch_for` boots the interpreter, but the function still has to
+    be invoked — this is what closes that loop, and what turns `@on_event` into
+    real page subscriptions.
+    """
+    global _active_page
+    page = _active_page or Page()
+    _active_page = page
+    info = await page.info()
+    fired: list[str] = []
+
+    for decl in list(DECLARATIONS["watch_for"]):
+        if decl.get("url") and not decl["url"]:
+            continue
+        rules = [d for d in DECLARATIONS["urlmatch"] if d["fn"] == decl["fn"]]
+        if rules and not any(_url_allows(r["patterns"], info["url"]) for r in rules):
+            continue
+        try:
+            present = await page.count(decl["selector"])
+        except Exception:  # noqa: BLE001
+            present = 1  # cannot check: do not silently skip the app
+        if present:
+            _invoke(decl["callable"])
+            fired.append(decl["fn"])
+
+    groups: dict[tuple[str | None, str], list[Callable]] = {}
+    for decl in DECLARATIONS["on_event"]:
+        event = decl["event"].split(".")[-1]
+        groups.setdefault((decl.get("selector"), event), []).append(decl["callable"])
+    for (selector, event), fns in groups.items():
+        page.subscribe(selector or "*", [event], throttle_ms=50)
+
+        def handler(payload: Any, fns: list[Callable] = fns) -> None:
+            for f in fns:
+                _invoke(f, payload)
+
+        page.on_page_event(handler)
+        fired.extend(f.__name__ for f in fns)
+
+    try:
+        document.body.dataset.pyodexDispatch = ",".join(fired) or "none"
+    except Exception:  # noqa: BLE001
+        pass
+    return {"fired": fired, "url": info["url"]}
 
 
 def declarations() -> dict:
@@ -198,12 +345,21 @@ def release() -> None:
 class Overlay:
     """Convenience wrapper around the overlay document body.
 
-    The overlay is click-through by default. Elements created via
-    `button`/`panel` get `pointer-events: auto` so they are interactive.
+    The overlay iframe is click-through unless told otherwise, because a
+    full-viewport iframe that captures pointers blocks the page underneath.
+    Interactive UI therefore has to opt in — which `interactive=True` (the
+    default) does, by asking the content script to capture pointers for this
+    tab. Pass `interactive=False` for effects-only overlays (canvas, particles)
+    that must let the page keep working.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, interactive: bool = True) -> None:
         self.body = document.body
+        self.interactive = interactive
+        if interactive:
+            # Without this the iframe stays pointer-events: none and *no* real
+            # click can reach anything we render.
+            _post("page.pointer", True)
 
     def mount(self, element: Any) -> Any:
         self.body.appendChild(element)
@@ -396,20 +552,25 @@ class WebSocketClient:
     @classmethod
     async def connect(cls, url: str, protocols: list[str] | None = None, timeout: float = 10.0) -> "WebSocketClient":
         raw = js.WebSocket.new(url, to_js(protocols)) if protocols else js.WebSocket.new(url)
-        loop = asyncio.get_event_loop()
-        opened = loop.create_future()
+        state = {"open": False, "error": None}
 
         def _ok(_ev: Any) -> None:
-            if not opened.done():
-                opened.set_result(True)
+            state["open"] = True
 
         def _fail(_ev: Any) -> None:
-            if not opened.done():
-                opened.set_exception(ConnectionError(f"websocket failed: {url}"))
+            state["error"] = "websocket failed"
 
         listen(raw, "open", _ok)
         listen(raw, "error", _fail)
-        await asyncio.wait_for(opened, timeout)
+        # Poll rather than race a promise: a promise race can hang forever under
+        # JSPI and would ignore the timeout entirely.
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not state["open"] and state["error"] is None:
+            if asyncio.get_event_loop().time() > deadline:
+                raise ConnectionError(f"websocket timed out: {url}")
+            await asyncio.sleep(0.01)
+        if state["error"]:
+            raise ConnectionError(f"{state['error']}: {url}")
         return cls(raw)
 
     def _on_message(self, ev: Any) -> None:
