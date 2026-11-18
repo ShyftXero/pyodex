@@ -294,7 +294,7 @@ def prune_store(*, keep: set[str] | None = None, dry: bool = False) -> list[Path
             continue
         for ver_dir in name_dir.iterdir():
             key = f"{name_dir.name}=={ver_dir.name}"
-            if keep and key in keep:
+            if keep and (key in keep or name_dir.name == "micropip"):
                 continue
             removed.append(ver_dir)
             if not dry:
