@@ -79,6 +79,30 @@ def login_form_seen(): ...
 
 @on_event(events.SUBMIT, selector="form")   # react to page events
 def on_submit(payload): ...
+
+@urlmatch(["127.0.0.1", "*.mysite.com", "https://some.site.com"])
+def only_these_sites(): ...      # URL gate; combine with @watch_for to require both
+```
+
+`@urlmatch` takes the pattern you actually mean and classifies it, so there is no
+matcher DSL to learn:
+
+| Pattern | Interpreted as |
+|---|---|
+| `127.0.0.1` | exact host |
+| `*.mysite.com` | `mysite.com` and every subdomain (Chrome match-pattern semantics) |
+| `*` | any host |
+| `https://some.site.com` | URL prefix |
+| `https://*`, `https://*.site.com/*` | URL wildcard |
+| `https?://.*\\.php`, `re:...` | regular expression |
+
+Stacked on one function, decorators are ANDed — the app boots only when the URL
+matches *and* the element exists:
+
+```python
+@urlmatch(["https://*", "http://*"])
+@watch_for("input[type=password]")
+def login_form_seen(): ...
 ```
 
 `@watch_for` implies `boot = "trigger"`, `@on_load` implies `visible`, nothing

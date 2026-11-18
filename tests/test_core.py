@@ -273,3 +273,54 @@ def test_password_manager_example_uses_decorators():
     assert cfg.boot == "trigger"  # inferred, not configured
     assert cfg.triggers[0]["selector"] == "input[type=password]"
     assert cfg.declarations["events"] == [{"event": "page.submit", "selector": "form"}]
+
+
+def test_urlmatch_classification():
+    from pyodex.declarations import classify
+
+    assert classify("127.0.0.1") == {"kind": "host", "pattern": "127.0.0.1"}
+    assert classify("*.mysite.com") == {"kind": "host", "pattern": "*.mysite.com"}
+    assert classify("https://some.site.com") == {"kind": "prefix", "pattern": "https://some.site.com"}
+    assert classify("https?://.*:?/.*.php")["kind"] == "regex"
+    assert classify("re:^https://x/.*")["kind"] == "regex"
+    # a URL wildcard must not degrade into a literal prefix
+    wild = classify("https://*")
+    assert wild["kind"] == "regex" and wild["pattern"] == "^https://.*$"
+    deep = classify("https://*.mysite.com/*")
+    assert deep["kind"] == "regex" and deep["pattern"].startswith("^https://.*\\.mysite\\.com/.*$")
+
+
+def test_urlmatch_combines_with_watch_for(tmp_path):
+    from pyodex.declarations import extract
+
+    f = tmp_path / "main.py"
+    f.write_text('''
+from pyodex_runtime import urlmatch, watch_for
+
+@urlmatch(["https://*", "*.mysite.com"])
+@watch_for("input[type=password]")
+def both(): ...
+''')
+    d = extract([f])
+    assert len(d.triggers) == 1
+    t = d.triggers[0]
+    assert t["selector"] == "input[type=password]"
+    assert {r["kind"] for r in t["url_rules"]} == {"regex", "host"}
+
+
+def test_urlmatch_alone_triggers_boot(tmp_path):
+    from pyodex.builder import resolve_project
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "Site"\n')
+    (tmp_path / "main.py").write_text(
+        'from pyodex_runtime import urlmatch\n@urlmatch(["127.0.0.1", "*.mysite.com"])\ndef f(): ...\n')
+    cfg = resolve_project(tmp_path)[1]
+    assert cfg.boot == "trigger"
+    assert cfg.triggers == [{"url_rules": [
+        {"kind": "host", "pattern": "127.0.0.1"}, {"kind": "host", "pattern": "*.mysite.com"}]}]
+
+
+def test_urlmatch_renders_into_injector(tmp_path):
+    _, js = _build(tmp_path, '[extension]\nname = "Site"\n', (
+        "from pyodex_runtime import urlmatch\n@urlmatch(['127.0.0.1'])\ndef f(): ...\n"))
+    assert "urlRulesMatch" in js and "127.0.0.1" in js

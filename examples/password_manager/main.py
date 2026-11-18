@@ -14,12 +14,13 @@ engine (docs/shared-engine.md) is what removes the per-tab heap.
 
 import asyncio
 
-from pyodex_runtime import Page, events, on_event, status, watch_for
+from pyodex_runtime import Page, events, on_event, status, urlmatch, watch_for
 
 page = Page()
 
 
-@watch_for("input[type=password]")
+@urlmatch(["https://*", "http://*"])      # real pages only, never file:// or chrome://
+@watch_for("input[type=password]")        # ...and only where a password field exists
 def login_form_seen():
     """Called the first time this page is found to contain a password field."""
     asyncio.ensure_future(prepare())
