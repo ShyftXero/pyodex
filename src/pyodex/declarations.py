@@ -41,7 +41,52 @@ EVENT_NAMES = {
     "TAB_HIDDEN": "tab.hidden",
 }
 
-KNOWN = {"on_load", "watch_for", "on_event"}
+KNOWN = {"on_load", "watch_for", "on_event", "urlmatch"}
+
+# Characters that only make sense in a regular expression. A pattern containing
+# one is treated as a regex; otherwise `://` means URL prefix, and anything else
+# is a hostname.
+REGEX_HINTS = set("?()[]|^$\\+")
+URL_PREFIX_HINT = "://"
+
+
+def classify(pattern: str) -> dict:
+    """Turn one developer-facing pattern into a structured, predictable rule.
+
+    Accepts, in the order a developer is likely to write them:
+
+        127.0.0.1                  host, exact
+        *.mysite.com               host, domain and its subdomains
+        *                          any host
+        https://some.site.com      URL prefix
+        https?://.*\\.php          regex (explicit `re:` also works)
+    """
+    raw = pattern.strip()
+    if not raw:
+        raise ValueError("empty urlmatch pattern")
+    if raw.startswith("re:"):
+        return {"kind": "regex", "pattern": raw[3:]}
+    if any(ch in REGEX_HINTS for ch in raw):
+        return {"kind": "regex", "pattern": raw}
+    if URL_PREFIX_HINT in raw:
+        # `https://*` and `https://*.site.com/*` are wildcards, not literals.
+        if "*" in raw:
+            return {"kind": "regex", "pattern": _url_glob_to_regex(raw)}
+        return {"kind": "prefix", "pattern": raw}
+    return {"kind": "host", "pattern": raw.lower()}
+
+
+def _url_glob_to_regex(pattern: str) -> str:
+    """Escape a URL pattern and turn `*` into `.*` (anchored full match)."""
+    out = []
+    for ch in pattern:
+        if ch == "*":
+            out.append(".*")
+        elif ch in ".+?^${}()|[]\\":
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "^" + "".join(out) + "$"
 
 
 @dataclass
@@ -49,6 +94,7 @@ class Declarations:
     on_load: bool = False
     triggers: list[dict] = field(default_factory=list)  # {"selector": ..., "url": ...}
     events: list[dict] = field(default_factory=list)  # {"event": ..., "selector": ...}
+    url_rules: list[dict] = field(default_factory=list)  # classified @urlmatch patterns
     problems: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -56,6 +102,7 @@ class Declarations:
             "on_load": self.on_load,
             "triggers": self.triggers,
             "events": self.events,
+            "url_rules": self.url_rules,
             "problems": self.problems,
         }
 
@@ -91,7 +138,12 @@ def _args(call: ast.Call) -> dict:
 
 
 def extract(paths: list[Path]) -> Declarations:
-    """Read declarations out of one or more source files."""
+    """Read declarations out of one or more source files.
+
+    Decorators are collected per function, so `@urlmatch` and `@watch_for` on
+    the same function combine (URL gate AND element present) instead of becoming
+    two unrelated rules.
+    """
     out = Declarations()
     for path in paths:
         try:
@@ -109,6 +161,10 @@ def extract(paths: list[Path]) -> Declarations:
             decorators = getattr(node, "decorator_list", None)
             if not decorators:
                 continue
+            selectors: list[str] = []
+            url_rules: list[dict] = []
+            events_here: list[dict] = []
+
             for dec in decorators:
                 name = _decorator_name(dec)
                 if name not in KNOWN:
@@ -122,23 +178,29 @@ def extract(paths: list[Path]) -> Declarations:
 
                 if name == "on_load":
                     out.on_load = True
-                    continue
-
-                # @watch_for("sel") -> positional; @on_event(E, selector="s") -> kwarg only
-                selector = args.get("selector") or args.get("arg0")
-                url = args.get("url")
-
-                if name == "watch_for":
+                elif name == "watch_for":
+                    selector = args.get("selector") or args.get("arg0")
                     if not selector and args.get("id"):
                         selector = f"#{args['id']}"
                     if not selector:
                         out.problems.append(f"{path.name}: @watch_for needs a selector or id")
                         continue
-                    entry = {"selector": selector}
-                    if url:
-                        entry["url"] = url
-                    if entry not in out.triggers:
-                        out.triggers.append(entry)
+                    selectors.append(selector)
+                elif name == "urlmatch":
+                    urls = args.get("arg0", args.get("urls", args.get("patterns")))
+                    if isinstance(urls, str):
+                        urls = [urls]
+                    if not urls:
+                        out.problems.append(f"{path.name}: @urlmatch needs a pattern or list")
+                        continue
+                    for pattern in urls:
+                        try:
+                            rule = classify(str(pattern))
+                        except ValueError as e:
+                            out.problems.append(f"{path.name}: @urlmatch: {e}")
+                            continue
+                        if rule not in url_rules:
+                            url_rules.append(rule)
                 else:  # on_event
                     event = args.get("event") or args.get("arg0")
                     if not event:
@@ -147,8 +209,27 @@ def extract(paths: list[Path]) -> Declarations:
                     entry = {"event": str(event)}
                     if args.get("selector"):
                         entry["selector"] = args["selector"]
-                    if entry not in out.events:
-                        out.events.append(entry)
+                    events_here.append(entry)
+
+            for rule in url_rules:
+                if rule not in out.url_rules:
+                    out.url_rules.append(rule)
+            for entry in events_here:
+                if entry not in out.events:
+                    out.events.append(entry)
+
+            # One trigger per (selector | url-gate) combination declared here.
+            if selectors:
+                for selector in selectors:
+                    trigger: dict = {"selector": selector}
+                    if url_rules:
+                        trigger["url_rules"] = url_rules
+                    if trigger not in out.triggers:
+                        out.triggers.append(trigger)
+            elif url_rules:
+                trigger = {"url_rules": url_rules}
+                if trigger not in out.triggers:
+                    out.triggers.append(trigger)
     return out
 
 
@@ -160,4 +241,7 @@ def summarise(d: Declarations) -> str:
         bits.append(f"{len(d.triggers)} watch_for")
     if d.events:
         bits.append(f"{len(d.events)} on_event")
+    if d.url_rules:
+        kinds = ", ".join(sorted({r["kind"] for r in d.url_rules}))
+        bits.append(f"{len(d.url_rules)} urlmatch ({kinds})")
     return ", ".join(bits) or "none"

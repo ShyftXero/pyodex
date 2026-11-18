@@ -307,10 +307,45 @@
     return re.test(haystack);
   }
 
+  // Structured rules from @urlmatch, classified at build time so the semantics
+  // are predictable: host / prefix / regex, each documented in the README.
+  function urlRulesMatch(rules) {
+    if (!rules || !rules.length) return true;
+    const href = location.href;
+    const host = location.hostname.toLowerCase();
+    for (const r of rules) {
+      if (r.kind === "regex") {
+        try {
+          if (new RegExp(r.pattern, "i").test(href)) return true;
+        } catch {
+          /* invalid pattern: ignore this rule, never throw into the page */
+        }
+        continue;
+      }
+      if (r.kind === "prefix") {
+        if (href.toLowerCase().startsWith(String(r.pattern).toLowerCase())) return true;
+        continue;
+      }
+      const p = String(r.pattern || "").toLowerCase();
+      if (p === "*") return true;
+      if (p.startsWith("*.")) {
+        const base = p.slice(2);
+        if (host === base || host.endsWith("." + base)) return true; // Chrome semantics
+        continue;
+      }
+      if (host === p) return true;
+    }
+    return false;
+  }
+
   function triggerMatched() {
     if (!TRIGGERS.length) return false;
     for (const t of TRIGGERS) {
-      if (!globMatch(location.href, t.url)) continue;
+      if (t.url_rules) {
+        if (!urlRulesMatch(t.url_rules)) continue;
+      } else if (!globMatch(location.href, t.url)) {
+        continue;
+      }
       if (t.selector && !document.querySelector(t.selector)) continue;
       return true;
     }

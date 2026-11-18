@@ -111,7 +111,31 @@ class events:
     TAB_HIDDEN = "tab.hidden"
 
 
-DECLARATIONS: dict[str, list] = {"watch_for": [], "on_event": []}
+DECLARATIONS: dict[str, list] = {"watch_for": [], "on_event": [], "urlmatch": []}
+
+
+def urlmatch(patterns: str | list[str]) -> Callable:
+    """Gate this app to pages whose URL matches one of `patterns`.
+
+    Write the pattern you mean; the build classifies it:
+
+        127.0.0.1                  exact host
+        *.mysite.com               domain and subdomains
+        *                          any host
+        https://some.site.com      URL prefix
+        https?://.*\\.php          regex (`re:` prefix also works)
+
+    Combine with @watch_for on the same function to require both.
+    """
+    plist = [patterns] if isinstance(patterns, str) else list(patterns)
+    if not plist:
+        raise ValueError("urlmatch needs at least one pattern")
+
+    def deco(fn: Callable) -> Callable:
+        DECLARATIONS["urlmatch"].append({"patterns": plist, "fn": fn.__name__})
+        return fn
+
+    return deco
 
 
 def watch_for(selector: str | None = None, *, id: str | None = None, url: str | None = None) -> Callable:
@@ -143,7 +167,7 @@ def on_event(event: str, *, selector: str | None = None) -> Callable:
 
 def declarations() -> dict:
     """Snapshot of what this app declared, for the host to route on."""
-    return {"watch_for": list(DECLARATIONS["watch_for"]), "on_event": list(DECLARATIONS["on_event"])}
+    return {k: list(v) for k, v in DECLARATIONS.items()}
 
 
 def want_boot(mode: str = "auto") -> None:
