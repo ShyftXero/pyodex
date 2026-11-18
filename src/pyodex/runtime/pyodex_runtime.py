@@ -120,6 +120,8 @@ class Page:
     def __init__(self) -> None:
         self._pending: dict[int, asyncio.Future] = {}
         self._next = 0
+        self._event_handlers: list[Any] = []
+        self._last_error: str | None = None
         listen(window, "message", self._on_message)
 
     def _on_message(self, ev: Any) -> None:
@@ -129,6 +131,14 @@ class Page:
                 return
         except AttributeError:
             return
+        if getattr(data, "type", None) == "page.event":
+            payload = json.loads(js.JSON.stringify(data.payload))
+            for h in list(self._event_handlers):
+                h(payload)
+            return
+        err = getattr(data, "error", None)
+        if err:
+            self._last_error = str(err)
         fut = self._pending.pop(int(data.id), None) if hasattr(data, "id") else None
         if fut and not fut.done():
             fut.set_result(json.loads(js.JSON.stringify(data.payload)))
@@ -151,6 +161,71 @@ class Page:
 
     def remove_overlay(self) -> None:
         self._send("page.remove")
+
+    # -- host DOM --------------------------------------------------------- #
+
+    async def dom(self, op: str, sel: str = "", **kw: Any) -> Any:
+        """Run a DOM op in the host page via the content-script bridge.
+
+        ops: query, count, html, text, attr, set_text, set_html, set_attr,
+             set_value, click, scroll_to. Raises PageError on failure.
+        """
+        fut = self._send("page.dom", {"op": op, "sel": sel, **kw}, want_reply=True)
+        res = await fut
+        # error is carried out-of-band so a Python-side check stays simple
+        return self._check(res)
+
+    def _check(self, res: Any) -> Any:
+        err = self._last_error
+        self._last_error = None
+        if err:
+            raise PageError(err)
+        return res
+
+    async def query(self, sel: str) -> list[dict]:
+        return await self.dom("query", sel)
+
+    async def text(self, sel: str) -> list[str]:
+        return (await self.dom("text", sel))["text"]
+
+    async def count(self, sel: str) -> int:
+        return int(await self.dom("count", sel))
+
+    async def html(self, sel: str) -> list[str]:
+        return (await self.dom("html", sel))["html"]
+
+    async def attr(self, sel: str, name: str) -> list[Any]:
+        return (await self.dom("attr", sel, attr=name))["values"]
+
+    async def set_text(self, sel: str, value: str, index: int = 0) -> None:
+        await self.dom("set_text", sel, value=value, index=index)
+
+    async def set_html(self, sel: str, value: str, index: int = 0) -> None:
+        await self.dom("set_html", sel, value=value, index=index)
+
+    async def set_value(self, sel: str, value: str, index: int = 0) -> None:
+        await self.dom("set_value", sel, value=value, index=index)
+
+    async def click(self, sel: str, index: int = 0) -> None:
+        await self.dom("click", sel, index=index)
+
+    async def scroll_to(self, sel: str, index: int = 0) -> None:
+        await self.dom("scroll_to", sel, index=index)
+
+    def subscribe(self, selector: str, events: list[str] | None = None, throttle_ms: int = 0) -> None:
+        """Stream host-page events to `on_page_event` listeners."""
+        self._send("page.events", {"selector": selector,
+                                   "events": events or ["click"],
+                                   "throttle_ms": throttle_ms})
+
+    def on_page_event(self, fn: Callable[[dict], None]) -> Callable[[dict], None]:
+        """Register a listener for host-page events. Returns fn for chaining."""
+        self._event_handlers.append(create_proxy(fn))
+        return fn
+
+
+class PageError(RuntimeError):
+    """Raised when a host-page DOM op fails."""
 
 
 # --------------------------------------------------------------------------- #

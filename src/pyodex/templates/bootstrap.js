@@ -10,6 +10,32 @@ const setStatus = (text, isError = false) => {
   status.classList.toggle("error", isError);
 };
 
+// Full traceback panel. Python errors are kept verbatim; JS errors also show stack.
+const errPanel = document.getElementById("pyodex-error");
+function showError(err, context = "error") {
+  const text = err?.stack || err?.message || String(err);
+  console.error(`[pyodex] ${context}:`, err);
+  if (!errPanel) return;
+  errPanel.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "pyodex-err-head";
+  head.append(Object.assign(document.createElement("span"), { textContent: `pyodex ${context}` }));
+  const btns = document.createElement("div");
+  for (const [label, fn] of [
+    ["copy", () => navigator.clipboard?.writeText(text)],
+    ["close", () => errPanel.classList.remove("show")],
+  ]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", fn);
+    btns.append(b);
+  }
+  head.append(btns);
+  errPanel.append(head, document.createTextNode(text));
+  errPanel.classList.add("show");
+  setStatus(`${context}: ${(err?.message || String(err)).split("\n")[0]}`, true);
+}
+
 async function fetchText(rel) {
   const r = await fetch(chrome.runtime.getURL(rel));
   if (!r.ok) throw new Error(`fetch ${rel}: ${r.status}`);
@@ -68,6 +94,11 @@ async function boot() {
 }
 
 boot().catch((err) => {
-  console.error("[pyodex] boot error:", err);
-  setStatus("Python error: " + (err?.message || err), true);
+  // Pyodide wraps Python exceptions in PythonError; its .message holds the traceback.
+  const isPy = err && (err.type === "PythonError" || err.constructor?.name === "PythonError");
+  showError(err, isPy ? "Python error" : "boot error");
 });
+
+// Async errors from app code (asyncio tasks, setTimeout) surface here too.
+window.addEventListener("unhandledrejection", (e) => showError(e.reason, "unhandled rejection"));
+window.addEventListener("error", (e) => showError(e.error || e.message, "uncaught error"));
