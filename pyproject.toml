@@ -17,4 +17,4 @@ build-backend = "hatchling.build"
 packages = ["src/pyodex"]
 
 [dependency-groups]
-dev = ["ruff>=0.6"]
+dev = ["ruff>=0.6", "pytest>=8", "websockets>=13"]
