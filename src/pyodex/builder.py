@@ -51,10 +51,38 @@ class ExtConfig:
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
     overlay_body: str = ""  # inline alternative to overlay.body.html
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
+    # Boot policy: "user" (launcher click), "visible" (boot when the tab is
+    # visible), "auto" (boot on every page load). Extensions that must act on
+    # page load set "auto"; idle tabs should stay "user".
+    boot: str = "user"
+    idle_timeout: int = 600  # "user" mode: seconds of inactivity before freeing the interpreter
+    reap_hidden_after: int = 300  # "visible"/"auto": seconds hidden before freeing it (0 = never)
+    max_live: int = 0  # cap on interpreters across all tabs (0 = unlimited); extra tabs fall back to "user"
 
     @property
     def slug(self) -> str:
         return re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")
+
+
+def _boot_mode(ext: dict, entry_source: str = "") -> str:
+    """Resolve the boot ceiling.
+
+    Explicit `boot` wins. Otherwise the entry script can ask for load-time
+    execution by using `@on_load`, which is a declaration rather than a
+    config flag someone copies without thinking.
+    """
+    mode = ext.get("boot")
+    if mode is None:
+        if ext.get("lazy") is not None:
+            return "user" if ext["lazy"] else "auto"
+        if "@on_load" in entry_source or "on_load(" in entry_source:
+            print("boot: entry uses @on_load -> defaulting to boot = \"visible\" "
+                  "(bounded by reap_hidden_after)")
+            return "visible"
+        return "user"
+    if mode not in ("user", "visible", "auto"):
+        raise ValueError(f"boot must be user|visible|auto, got {mode!r}")
+    return mode
 
 
 def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> ExtConfig:
@@ -78,7 +106,27 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         overlay_css=ext.get("overlay_css", ""),
         overlay_body=ext.get("overlay_body", ""),
         natural=ext.get("natural", True),
+        boot=_boot_mode(ext),
+        idle_timeout=ext.get("idle_timeout", 600),
+        reap_hidden_after=ext.get("reap_hidden_after", 300),
+        max_live=ext.get("max_live", 0),
     )
+
+
+def _apply_on_load_hint(project: Path, cfg: ExtConfig, ext: dict) -> ExtConfig:
+    """If the entry script uses @on_load and no boot policy was set, boot when visible."""
+    if ext.get("boot") is not None or ext.get("lazy") is not None:
+        return cfg
+    entry = project / cfg.entry
+    try:
+        src = entry.read_text()
+    except OSError:
+        return cfg
+    if "@on_load" in src or "on_load(" in src:
+        cfg.boot = "visible"
+        print(f'boot: {entry.name} uses @on_load -> boot = "visible" (hidden tabs are released '
+              f"after {cfg.reap_hidden_after}s; set boot=\"auto\" to also run while hidden)")
+    return cfg
 
 
 def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
@@ -92,7 +140,8 @@ def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
         if not cfg_path.exists():
             raise FileNotFoundError(f"no pyodex.toml in {target}")
         data = tomllib.loads(cfg_path.read_text())
-        return target, _config_from_data(data, default_name=target.name, default_entry="main.py")
+        cfg = _config_from_data(data, default_name=target.name, default_entry="main.py")
+        return target, _apply_on_load_hint(target, cfg, data.get("extension", {}))
     if target.suffix == ".py":
         from .packages import read_pep723
 
@@ -100,7 +149,8 @@ def resolve_project(target: Path) -> tuple[Path, ExtConfig]:
         tool = meta.get("tool", {}).get("pyodex", {})
         # [tool.pyodex] is flat; [tool.pyodex.vendor] holds URL assets.
         data = {"extension": {k: v for k, v in tool.items() if k != "vendor"}, "vendor": tool.get("vendor", {})}
-        return target.parent, _config_from_data(data, default_name=target.stem, default_entry=target.name)
+        cfg = _config_from_data(data, default_name=target.stem, default_entry=target.name)
+        return target.parent, _apply_on_load_hint(target.parent, cfg, data["extension"])
     raise FileNotFoundError(f"{target}: not a project dir or .py script")
 
 
@@ -235,6 +285,11 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "SCRIPTS": script_tags,
         "URL_FILTER": json.dumps(cfg.url_filter),
         "SLUG": cfg.slug,
+        "LABEL": json.dumps(cfg.name),
+        "BOOT_MODE": json.dumps(cfg.boot),
+        "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
+        "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
+        "MAX_LIVE": str(int(cfg.max_live)),
     }
     for t in ("overlay.html", "bootstrap.js", "injector.js"):
         (out / t).write_text(_render((TEMPLATES / t).read_text(), ctx))
