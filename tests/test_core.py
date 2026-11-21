@@ -356,3 +356,35 @@ def test_pip_install_pins_index_and_verifies():
     assert "DEFAULT_INDEX = \"https://pypi.org/simple/\"" in src
     assert "_verify_imports(list(packages))" in src
     assert "pyodide/pyodide/issues/6569" in src  # the reason, not just the code
+
+
+def test_cache_wiring(tmp_path):
+    """Cache ships its module, options page, and the storage permission it needs."""
+    built, _ = _build(tmp_path, '[extension]\nname = "Cached"\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert manifest["options_ui"]["page"] == "options.html"
+    assert "storage" in manifest["permissions"]  # chrome.storage is undefined without it
+    for name in ("cache.js", "options.html", "options.js"):
+        assert (built / name).exists(), name
+    bootstrap = (built / "bootstrap.js").read_text()
+    assert 'from "./cache.js"' in bootstrap
+    assert "window.pyodexCache" in bootstrap
+
+
+def test_cache_can_be_disabled(tmp_path):
+    built, _ = _build(tmp_path, '[extension]\nname = "NoCache"\ncache = false\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert "options_ui" not in manifest
+    assert "permissions" not in manifest
+    assert not (built / "cache.js").exists()
+
+
+def test_cache_verifies_digests_and_honours_optout():
+    """The cache must never serve bytes whose digest differs from the request."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "pyodex" / "templates" / "cache.js").read_text()
+    assert "crypto.subtle.digest" in src
+    assert "digest mismatch" in src          # loud failure, not a stale serve
+    assert "await cache.delete(key)" in src  # eviction on mismatch
+    assert "purgeOptedOut" in src            # opting out cleans up after itself

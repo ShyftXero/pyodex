@@ -621,6 +621,33 @@ class persist:
 DEFAULT_INDEX = "https://pypi.org/simple/"
 
 
+async def cache_fetch(url: str, digest: str | None = None) -> tuple[bytes, str]:
+    """Fetch through the extension blob cache; returns (bytes, source).
+
+    `digest` is the expected sha256 (hex). The cache serves a stored copy only
+    when the digest matches, and throws on a mismatch instead of serving stale
+    bytes. Hosts on the opt-out list are fetched but never cached.
+    """
+    res = await js.pyodexCacheBytes(url, digest)
+    return bytes(res.bytes.to_py()), str(res.source)
+
+
+def cache_no_sites() -> list[str]:
+    """Hosts currently opted out of caching (the same list the options page edits)."""
+    raise RuntimeError("cache_no_sites is only available in async code; see cache_no_sites_async")
+
+
+async def cache_no_sites_async() -> list[str]:
+    hosts = await js.pyodexCache.noCacheHosts()
+    return list(hosts.to_py())
+
+
+async def cache_set_no_sites(hosts: list[str]) -> list[str]:
+    """Replace the opt-out list; matching cached blobs are purged."""
+    out = await js.pyodexCache.setNoCacheHosts(to_js(list(hosts)))
+    return list(out.to_py())
+
+
 def _verify_imports(packages: list[str]) -> None:
     """micropip can report success and install nothing; make that loud.
 

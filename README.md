@@ -274,6 +274,28 @@ Snapshot holds: JSPI, FS types, ffi surface, JS API keys, stdlib gaps, every
 shipped package version. `diff` lists added/removed/changed entries so new
 runtime features show up as a to-do for shims.
 
+## Blob cache
+
+Pyodide runtimes and wheels are large and immutable per version, which makes them
+good cache citizens — as long as nothing stale is ever served. A cached blob is
+keyed by URL and only served when its SHA-256 matches the digest the caller
+expects; a mismatch is a miss plus eviction, never a silent serve.
+
+```python
+import pyodex_natural as nat
+
+data, source = await nat.cache_fetch(url, expected_sha256)   # source: "cache" | "network"
+await nat.cache_set_no_sites(["*.example.com"])              # purges that host
+```
+
+Caching is on by default (`cache = false` disables it). It is per-site opt-out:
+the options page lists host patterns (`example.com`, `*.example.com`, `*`), and
+both the browser's storage estimate and a 200 MB budget are surfaced there, with
+clear/import/export. Opting a host out purges its entries immediately.
+
+Proven by harness level L5: one network request for a blob across two page loads,
+refetch on digest mismatch, and a re-fetch on every load once the host opts out.
+
 ## Networking: what the browser actually allows
 
 Python expects sockets; a browser page cannot open one. Chrome's options, and
@@ -394,6 +416,7 @@ Six extensions, each built from a fixture and loaded into a real browser:
 | L4.1 web | URL gate + trigger boot, two tabs filled independently, `keep_alive`, traceback surfacing |
 | L4.2 net | `requests`, raw TCP over the proxy, proxy-terminated TLS, WebSocket |
 | L4.3 runtime | micropip at runtime, persistent dir, `input()` via prompt, capability probe |
+| L5 cache | digest-verified blob cache, no stale serving, per-site opt-out + options UI |
 
 ```
 uv run tests/chrome_harness.py                # all levels, parallel

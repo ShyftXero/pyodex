@@ -2,6 +2,7 @@
 // pyodex runtime helper and the app's Python files into the virtual FS, then
 // runs app/main.py.
 import { loadPyodide } from "./pyodide/pyodide.mjs";
+import * as pyodexCache from "./cache.js";
 
 const status = document.getElementById("pyodex-status");
 const setStatus = (text, isError = false) => {
@@ -54,6 +55,20 @@ const heartbeat = () => {
 for (const ev of ["pointerdown", "keydown", "focus"]) {
   window.addEventListener(ev, heartbeat, { capture: true, passive: true });
 }
+
+// Blob cache bridge: Python fetches through here so digests are enforced and
+// per-site opt-outs (options page) are honoured in one place.
+window.pyodexCache = {
+  fetch: (url, digest) => pyodexCache.cachedFetch(url, digest),
+  stats: pyodexCache.stats,
+  clearAll: pyodexCache.clearAll,
+  noCacheHosts: pyodexCache.noCacheHosts,
+  setNoCacheHosts: pyodexCache.setNoCacheHosts,
+};
+window.pyodexCacheBytes = async (url, digest) => {
+  const { data, source } = await pyodexCache.cachedFetch(url, digest);
+  return { bytes: new Uint8Array(data), source };
+};
 
 // Python reports background-task failures here (see pyodex_runtime._task_done).
 window.pyodexReportError = (msg) => showError(new Error(msg), "Python error");
