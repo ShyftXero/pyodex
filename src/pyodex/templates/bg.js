@@ -33,37 +33,28 @@ async function handleBlob(url, explicitDigest = null) {
 }
 
 // ---- shared engine ------------------------------------------------------- //
-let enginePort = null;
 let engineReady = false;
 
 async function ensureEngine() {
-  if (enginePort) return enginePort;
-  const has = await chrome.offscreen.hasDocument?.();
-  if (!has) {
-    try {
+  // Idempotent: Chrome allows a single offscreen document per extension.
+  try {
+    const has = await chrome.offscreen.hasDocument();
+    if (!has) {
       await chrome.offscreen.createDocument({
         url: "engine.html",
         reasons: ["WORKERS"],
         justification: "Host a single Pyodide interpreter shared by every tab.",
       });
-    } catch (e) {
-      if (!String(e).includes("Only a single offscreen")) throw e;
     }
+  } catch (e) {
+    if (!String(e).includes("Only a single offscreen")) throw e;
   }
-  return null;
 }
 
-function connectEngine() {
-  if (enginePort) return enginePort;
-  enginePort = chrome.runtime.connect({ name: "pyodex-engine" });
-  enginePort.onDisconnect.addListener(() => {
-    enginePort = null;
-    engineReady = false;
-  });
-  return enginePort;
-}
-
-function askEngine(msg, timeoutMs = 15000) {
+function askEngine(msg, timeoutMs = 20000) {
+  // Plain messages, not ports: an offscreen document is reachable by
+  // sendMessage, and a port that silently never connects looks exactly like a
+  // slow engine (we lost an hour to that).
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => {
@@ -73,18 +64,40 @@ function askEngine(msg, timeoutMs = 15000) {
       }
     };
     setTimeout(() => done({ ok: false, error: "engine timeout" }), timeoutMs);
-    try {
-      const port = connectEngine();
-      port.onMessage.addListener(function once(reply) {
-        port.onMessage.removeListener(once);
-        done(reply);
-      });
-      port.postMessage(msg);
-    } catch (e) {
-      done({ ok: false, error: String(e && e.message) });
-    }
+    // Envelope, not spread: spreading after `kind` would overwrite it with the
+    // request's own kind, and the engine would drop every message.
+    chrome.runtime.sendMessage({ pyodexEngineRequest: true, request: msg }).then(
+      (reply) => done(reply || { ok: false, error: "empty engine reply" }),
+      (err) => done({ ok: false, error: String(err && err.message) })
+    );
   });
 }
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.kind === "pyodex-attach") {
+    const tabId = sender.tab?.id ?? null;
+    if (tabId != null) lastTabId = tabId;
+    ensureEngine()
+      .then(() => askEngine({ kind: "attach", tabId, url: msg.url }))
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message) }));
+    return true;
+  }
+  if (msg?.kind === "pyodex-ui-event") {
+    askEngine({ kind: "ui-event", tabId: sender.tab?.id ?? lastTabId, id: msg.id, event: msg.event })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message) }));
+    return true;
+  }
+  if (msg?.kind === "pyodex-tab-op") {
+    // engine asks the worker to act on a specific tab
+    chrome.tabs.sendMessage(msg.tabId, { kind: "pyodex-tab-op", op: msg.op, args: msg.args })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message) }));
+    return true;
+  }
+  return false;
+});
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.kind === "pyodex-blob") {

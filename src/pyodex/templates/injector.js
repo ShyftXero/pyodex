@@ -6,6 +6,7 @@
 // Idle tabs therefore cost nothing here — no iframe, no interpreter — and the
 // interpreter is released again after `idle_timeout` seconds without activity.
 (() => {
+  if ({{ENGINE_UI}}) return; // engine mode: no iframe, no per-tab interpreter
   const FRAME_ID = "pyodex-{{SLUG}}-frame";
   const LAUNCHER_ID = "pyodex-{{SLUG}}-launcher";
   const URL_FILTER = {{URL_FILTER}};
@@ -416,4 +417,83 @@
   });
 
   start();
+})();
+
+// ---- engine mode ---------------------------------------------------------- //
+// With ui = "engine" there is no overlay iframe at all: Python lives in the
+// shared engine and drives this page through the ops below. The tab therefore
+// holds no interpreter, which is the whole point.
+(() => {
+  const ENGINE_MODE = {{ENGINE_UI}};
+  if (!ENGINE_MODE) return;
+
+  const HOST_ID = "pyodex-{{SLUG}}-ui";
+  let host = null;
+  let root = null;
+
+  function uiRoot() {
+    if (root) return root;
+    host = document.createElement("div");
+    host.id = HOST_ID;
+    host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+    root = host.attachShadow({ mode: "open" });
+    const sheet = document.createElement("style");
+    sheet.textContent = `button{pointer-events:auto;position:fixed;padding:10px 16px;font:600 14px system-ui,sans-serif;
+      color:#fff;background:#18181b;border:2px solid #f43f5e;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.25);cursor:pointer}
+      .panel{pointer-events:auto;position:fixed;background:rgba(24,24,27,.95);color:#fff;padding:12px;border-radius:8px;
+      font:14px system-ui,sans-serif;white-space:pre-wrap}`;
+    root.append(sheet);
+    document.documentElement.appendChild(host);
+    return root;
+  }
+
+  function op(name, args) {
+    const r = uiRoot();
+    if (name === "ui_button") {
+      const b = document.createElement("button");
+      b.id = args.id;
+      b.textContent = args.label;
+      b.style.top = `${args.top ?? 16}px`;
+      b.style.left = `${args.left ?? 16}px`;
+      b.addEventListener("click", () => {
+        chrome.runtime.sendMessage({ kind: "pyodex-ui-event", id: args.id, event: "click" });
+      });
+      r.append(b);
+      return { ok: true };
+    }
+    if (name === "ui_panel") {
+      let el = r.querySelector(`#${CSS.escape(args.id)}`);
+      if (!el) {
+        el = document.createElement("div");
+        el.id = args.id;
+        el.className = "panel";
+        el.style.top = `${args.top ?? 64}px`;
+        el.style.left = `${args.left ?? 16}px`;
+        r.append(el);
+      }
+      if (args.text !== undefined) el.textContent = String(args.text);
+      return { ok: true };
+    }
+    throw new Error(`unknown ui op ${name}`);
+  }
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.kind !== "pyodex-tab-op") return false;
+    let payload;
+    try {
+      payload = msg.op?.startsWith("ui_")
+        ? op(msg.op, msg.args || {})
+        : runDomOp({ ...(msg.args || {}), op: msg.op });
+      sendResponse({ ok: true, payload });
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e && e.message) });
+    }
+    return false;
+  });
+
+  // Announce this tab so the engine can address it. The reply is kept on window
+  // so failures are diagnosable from DevTools (and by the test harness).
+  chrome.runtime.sendMessage({ kind: "pyodex-attach", url: location.href })
+    .then((r) => { window.__pyodexAttach = r; })
+    .catch((e) => { window.__pyodexAttach = { ok: false, error: String(e && e.message) }; });
 })();

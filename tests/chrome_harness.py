@@ -258,6 +258,7 @@ class Level:
     fixture: str
     description: str
     rank: int = 0  # ordering for the monotonicity check
+    experimental: bool = False  # not part of the gate yet
     needs: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -272,6 +273,8 @@ LEVELS = [
     Level("L6", "l6-pagecache", "L6_pagecache", "shared CDN cache for other pages", 6, ("primary",)),
     Level("L7", "l7-remote", "L7_remote", "remote runtime streamed through the cache", 7, ("primary",)),
     Level("L8", "l8-shared", "L8_shared", "one interpreter shared by every tab", 8, ("primary",)),
+    Level("L9", "l9-engine-ui", "L9_engine_ui", "tabs hold no interpreter; engine drives them",
+          9, ("primary",), experimental=True),
 ]
 
 
@@ -636,6 +639,30 @@ def check_l8(level, ctx, env, c: Checks) -> None:
     second.close()
 
 
+def check_l9(level, ctx, env, c: Checks) -> None:
+    """With ui = "engine" a tab has no interpreter at all."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/login.html")
+    filled = wait_for(lambda: page.input_value("#user") == "l9@pytest", 120)
+    c.expect("engine filled the first tab (no click, no overlay)",
+             bool(filled), f"user={page.input_value('#user')!r}")
+    c.expect("password filled too", page.input_value("#pw") == "l9-secret",
+             f"pw={page.input_value('#pw')!r}")
+    c.expect("no overlay iframe in the tab",
+             not any("overlay.html" in (f.url or "") for f in page.frames),
+             "an overlay iframe was created")
+
+    second = ctx.new_page()
+    second.goto(f"{env['base']}/login.html")
+    c.expect("engine filled the second tab",
+             bool(wait_for(lambda: second.input_value("#user") == "l9@pytest", 120)),
+             f"user={second.input_value('#user')!r}")
+    c.expect("second tab has no overlay iframe either",
+             not any("overlay.html" in (f.url or "") for f in second.frames),
+             "an overlay iframe was created")
+    second.close()
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -647,6 +674,7 @@ CHECKS = {
     "L6": check_l6,
     "L7": check_l7,
     "L8": check_l8,
+    "L9": check_l9,
 }
 
 
@@ -783,7 +811,12 @@ def main(argv: list[str]) -> int:
     wanted = {a.upper() for a in args if a.upper().startswith("L")}
     jobs = int(jobs_flag or os.environ.get("PYODEX_HARNESS_JOBS") or default_jobs())
 
-    levels = [lvl for lvl in LEVELS if not wanted or lvl.name in wanted]
+    include_experimental = "--experimental" in args
+    levels = [
+        lvl for lvl in LEVELS
+        if (not wanted or lvl.name in wanted) and (include_experimental or not lvl.experimental)
+    ]
+    skipped = [lvl.name for lvl in LEVELS if lvl.experimental and lvl not in levels]
     if not levels:
         print(f"no levels matched {sorted(wanted)}")
         return 2
@@ -815,6 +848,8 @@ def main(argv: list[str]) -> int:
         "headless": not headed,
     }
 
+    if skipped:
+        print(f"skipping experimental: {', '.join(skipped)} (run with --experimental)")
     print(f"levels={len(levels)} jobs={jobs} headless={not headed} "
           f"(cpus={os.cpu_count()}, mem_available={available_mb()} MB)", flush=True)
 

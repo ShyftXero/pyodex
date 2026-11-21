@@ -63,6 +63,9 @@ class ExtConfig:
     # "local": one interpreter per tab (isolation, per-tab DOM, higher memory).
     # "shared": one interpreter for the browser in an offscreen document.
     engine: str = "local"
+    # "local": UI in a per-tab overlay iframe (has its own interpreter).
+    # "engine": tabs hold no interpreter at all; the shared engine drives them.
+    ui: str = "local"
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
@@ -128,6 +131,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         runtime_base=ext.get("runtime_base", "bundled"),
         popup=ext.get("popup", True),
         engine=ext.get("engine", "local"),
+        ui=ext.get("ui", "local"),
         boot=_boot_mode(ext),
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
@@ -230,9 +234,10 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
     if cfg.cache:
         m["options_ui"] = {"page": "options.html", "open_in_tab": True}
         perms.append("storage")  # chrome.storage holds the cache opt-out list
-    if cfg.engine == "shared":
+    if cfg.engine == "shared" or cfg.ui == "engine":
         perms.append("offscreen")  # hosts the single shared interpreter
-    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled" or cfg.engine == "shared":
+    if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
+            or cfg.engine == "shared" or cfg.ui == "engine"):
         m["background"] = {"service_worker": "bg.js", "type": "module"}
     if perms:
         m["permissions"] = perms
@@ -330,9 +335,10 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     if cfg.cache:
         for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled" or cfg.engine == "shared":
+    if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
+            or cfg.engine == "shared" or cfg.ui == "engine"):
         shutil.copy2(TEMPLATES / "bg.js", out / "bg.js")
-    if cfg.engine == "shared":
+    if cfg.engine == "shared" or cfg.ui == "engine":
         for name in ("engine.html", "engine.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
     if cfg.page_cache and cfg.page_cache_hosts:
@@ -358,6 +364,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
         "MAX_LIVE": str(int(cfg.max_live)),
         "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
+        "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
         "TRIGGERS": json.dumps(cfg.triggers),
     }
     for t in ("overlay.html", "bootstrap.js", "injector.js"):

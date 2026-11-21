@@ -431,7 +431,9 @@ def test_shared_engine_wiring(tmp_path):
     assert "offscreen" in manifest["permissions"]
     assert manifest["background"]["service_worker"] == "bg.js"
     assert (built / "engine.html").exists() and (built / "engine.js").exists()
-    assert "onConnect" in (built / "engine.js").read_text()
+    engine = (built / "engine.js").read_text()
+    assert "pyodexEngineRequest" in engine  # message-based, not ports
+    assert "pyodexEngine" in engine
 
 
 def test_local_engine_is_default(tmp_path):

@@ -365,6 +365,10 @@ Tabs reach it over the worker; the boot id in `shared_status()` identifies the
 instance, so two tabs returning the same id proves they share it — that is what
 harness level L8 asserts.
 
+Measured cost of the per-tab alternative, and what the engine does and does not
+remove, is in [`docs/memory.md`](docs/memory.md): **~55 MB per tab with an active
+overlay**, and the shipped `engine = "shared"` does not reduce that today.
+
 Scope, stated honestly: this shares the **interpreter**, which is where the memory
 goes. Per-tab overlay DOM still lives in the tab, because moving UI into the
 engine would make `Overlay`/`Page` async for every app. That migration is the open

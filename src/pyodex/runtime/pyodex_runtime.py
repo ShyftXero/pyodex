@@ -92,6 +92,52 @@ def pip_install(*packages: str) -> None:
     pyodex_natural.pip_install(*packages)
 
 
+def _engine() -> Any:
+    """The shared-engine bridge, if this app is running inside it."""
+    eng = getattr(js, "pyodexEngine", None)
+    return eng
+
+
+def engine_mode() -> bool:
+    """True when Python runs in the shared engine rather than in a tab's overlay."""
+    return _engine() is not None
+
+
+_ATTACH_HANDLERS: list[Callable] = []
+_UI_HANDLERS: dict[str, Callable] = {}
+
+
+def on_attach(fn: Callable) -> Callable:
+    """Called once per tab that attaches, with a Page bound to that tab.
+
+    Engine mode only: one interpreter serves every tab, so per-tab work is
+    addressed by tab id instead of by process.
+    """
+    _ATTACH_HANDLERS.append(fn)
+    return fn
+
+
+def _engine_attached(tab_id: int, url: str) -> None:
+    """Called by the engine host when a tab attaches (engine mode)."""
+    for fn in list(_ATTACH_HANDLERS):
+        try:
+            page = Page(tab_id=tab_id)
+            result = fn(page, url)
+            if asyncio.iscoroutine(result):
+                task = asyncio.ensure_future(result)
+                task.add_done_callback(_task_done)
+        except Exception as e:  # noqa: BLE001
+            import traceback as _tb
+
+            _report_exception("".join(_tb.format_exception(type(e), e, e.__traceback__)))
+
+
+def _engine_ui_event(element_id: str, event: str) -> None:
+    fn = _UI_HANDLERS.get(element_id)
+    if fn:
+        _invoke(fn, event)
+
+
 def _post(type_: str, payload: Any = None) -> None:
     window.parent.postMessage(jsobj({"pyodex": True, "type": type_, "payload": payload}), "*")
 
@@ -354,8 +400,12 @@ class Overlay:
     """
 
     def __init__(self, *, interactive: bool = True) -> None:
-        self.body = document.body
         self.interactive = interactive
+        if engine_mode():
+            # No document here: widgets are created in the tab by the agent.
+            self.body = None
+            return
+        self.body = document.body
         if interactive:
             # Without this the iframe stays pointer-events: none and *no* real
             # click can reach anything we render.
@@ -365,8 +415,19 @@ class Overlay:
         self.body.appendChild(element)
         return element
 
+    def _engine_op(self, op: str, args: dict) -> None:
+        eng = _engine()
+        tab = int(eng.currentTabId())
+        # Fire-and-forget: UI creation must not make every app's code async.
+        eng.tabOp(tab, op, jsobj(args))
+
     def button(self, label: str, *, top: int | None = None, left: int | None = None,
                right: int | None = None, bottom: int | None = None, id: str | None = None) -> Any:
+        if engine_mode():
+            widget_id = id or f"pyodex-btn-{len(_UI_HANDLERS) + 1}"
+            self._engine_op("ui_button", {"id": widget_id, "label": label, "top": top or 16, "left": left or 16})
+            return _EngineWidget(widget_id)
+
         b = el("button", id=id, text=label, position="fixed", z_index="10", pointer_events="auto",
                padding="10px 16px", font="600 14px system-ui, sans-serif", color="#fff",
                background="#18181b", border="2px solid #f43f5e", border_radius="8px",
@@ -387,15 +448,28 @@ class Overlay:
         return self.mount(el("div", id=id, position="fixed", inset="0", pointer_events="none"))
 
 
+class _EngineWidget:
+    """Handle for a widget that lives in the tab while Python lives in the engine."""
+
+    def __init__(self, widget_id: str) -> None:
+        self.id = widget_id
+
+    def on_click(self, fn: Callable) -> Callable:
+        _UI_HANDLERS[self.id] = fn
+        return fn
+
+
 class Page:
     """Talk to the host page via the content-script bridge (postMessage)."""
 
-    def __init__(self) -> None:
+    def __init__(self, tab_id: int | None = None) -> None:
+        self.tab_id = tab_id
         self._pending: dict[int, asyncio.Future] = {}
         self._next = 0
         self._event_handlers: list[Any] = []
         self._last_error: str | None = None
-        listen(window, "message", self._on_message)
+        if not engine_mode():
+            listen(window, "message", self._on_message)
 
     def _on_message(self, ev: Any) -> None:
         data = ev.data
@@ -443,6 +517,16 @@ class Page:
         ops: query, count, html, text, attr, set_text, set_html, set_attr,
              set_value, click, scroll_to. Raises PageError on failure.
         """
+        if engine_mode():
+            # Shared engine: ask the worker to run the op in this Page's tab.
+            eng = _engine()
+            tab = self.tab_id if self.tab_id is not None else int(eng.currentTabId())
+            reply = await eng.tabOp(tab, op, jsobj({"sel": sel, **kw}))
+            data = reply.to_py() if hasattr(reply, "to_py") else dict(reply)
+            if not data.get("ok", False):
+                raise PageError(str(data.get("error") or "tab op failed"))
+            return data.get("payload")
+
         fut = self._send("page.dom", {"op": op, "sel": sel, **kw}, want_reply=True)
         res = await fut
         # error is carried out-of-band so a Python-side check stays simple

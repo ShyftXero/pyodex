@@ -27,6 +27,8 @@ async function handle(msg) {
   if (msg.kind === "status") {
     return { ok: true, bootId: BOOT_ID, runs, ready: !!pyodidePromise };
   }
+  if (msg.kind === "attach") return dispatchAttach(msg.tabId, msg.url);
+  if (msg.kind === "ui-event") return dispatchUiEvent(msg.tabId, msg.id, msg.event);
   if (msg.kind === "run") {
     const py = await engine();
     runs += 1;
@@ -40,11 +42,71 @@ async function handle(msg) {
   return { ok: false, error: `unknown engine message: ${msg.kind}` };
 }
 
-// The worker owns the lifecycle; it connects here once per routed request.
-chrome.runtime.onConnect.addListener((port) => {
-  port.onMessage.addListener(async (msg) => {
-    port.postMessage(await handle(msg));
-  });
+// ---- per-tab sessions ---------------------------------------------------- //
+// One interpreter, many tabs: the app's main.py runs once and receives an
+// `on_attach` callback per tab, with a Page bound to that tab.
+const tabs = new Map(); // tabId -> url
+let appStarted = false;
+
+async function startApp(py) {
+  const code = await (await fetch(chrome.runtime.getURL("app/main.py"))).text();
+  await py.runPythonAsync(code);
+}
+
+async function dispatchAttach(tabId, url) {
+  if (tabId == null) return { ok: false, error: "no tab id" };
+  tabs.set(tabId, url);
+  const py = await engine();
+  if (!appStarted) {
+    appStarted = true;
+    try {
+      await startApp(py);
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e).slice(0, 600) };
+    }
+  }
+  try {
+    await py.runPythonAsync(`import pyodex_runtime as _r; _r._engine_attached(${tabId}, ${JSON.stringify(url || "")})`);
+    return { ok: true, bootId: BOOT_ID };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 600) };
+  }
+}
+
+globalThis.pyodexEngine = {
+  bootId: BOOT_ID,
+  currentTabId: () => [...tabs.keys()].pop() ?? null,
+  tabOp: (tabId, op, args) =>
+    chrome.runtime.sendMessage({ kind: "pyodex-tab-op", tabId, op, args: args ?? {} }),
+  onUiEvent: (id) => {
+    // Python registers a handler; the worker forwards clicks here.
+    globalThis.__pyodexUiHandlers = globalThis.__pyodexUiHandlers || {};
+    return id;
+  },
+};
+
+async function dispatchUiEvent(tabId, id, event) {
+  const py = await engine();
+  try {
+    await py.runPythonAsync(
+      `import pyodex_runtime as _r; _r._engine_ui_event(${JSON.stringify(id)}, ${JSON.stringify(event)})`
+    );
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 600) };
+  }
+}
+
+// The worker routes requests here. Plain messages, not ports: an offscreen
+// document is reachable by sendMessage, and port lifecycles between SW and
+// offscreen contexts are easy to get wrong (a port that silently never connects
+// looks exactly like a slow engine).
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg?.pyodexEngineRequest) return false;
+  handle(msg.request)
+    .then(sendResponse)
+    .catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }));
+  return true; // async response
 });
 
 // Announce readiness so the worker can stop re-creating this document.

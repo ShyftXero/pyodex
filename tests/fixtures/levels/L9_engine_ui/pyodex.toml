@@ -1,0 +1,7 @@
+[extension]
+name = "L9 Engine UI"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+engine = "shared"
+ui = "engine"
