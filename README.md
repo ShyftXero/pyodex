@@ -420,6 +420,12 @@ type `launch` / `stop`).
 uv run pyodex build examples/fireworks
 ```
 
+## Known issues
+
+Deliberate deviations and upstream bugs we work around are recorded in
+[`docs/known-issues.md`](docs/known-issues.md) — including why runtime pip needs an
+explicit index and why the socket probe no longer trusts `connect_ex`.
+
 ## Publishing
 
 First upload creates the PyPI project; the name is claimed atomically.
