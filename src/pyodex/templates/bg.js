@@ -51,6 +51,13 @@ async function ensureEngine() {
   }
 }
 
+// Create the host eagerly. Doing it inside a message handler means the first
+// request waits on document creation, and the response channel can close while
+// an async create is in flight (the attach reply simply never arrives).
+chrome.runtime.onInstalled.addListener(() => ensureEngine().catch(() => {}));
+chrome.runtime.onStartup.addListener(() => ensureEngine().catch(() => {}));
+ensureEngine().catch(() => {});
+
 function askEngine(msg, timeoutMs = 20000) {
   // Plain messages, not ports: an offscreen document is reachable by
   // sendMessage, and a port that silently never connects looks exactly like a

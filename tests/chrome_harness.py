@@ -258,8 +258,8 @@ class Level:
     fixture: str
     description: str
     rank: int = 0  # ordering for the monotonicity check
-    experimental: bool = False  # not part of the gate yet
     needs: tuple[str, ...] = field(default_factory=tuple)
+    experimental: bool = False  # not part of the gate yet
 
 
 LEVELS = [

@@ -369,6 +369,10 @@ Measured cost of the per-tab alternative, and what the engine does and does not
 remove, is in [`docs/memory.md`](docs/memory.md): **~55 MB per tab with an active
 overlay**, and the shipped `engine = "shared"` does not reduce that today.
 
+`ui = "engine"` (tabs hold no interpreter, Python paints into them) is **not
+finished** — see [`docs/engine-ui-notes.md`](docs/engine-ui-notes.md) for exactly
+where it breaks and the cheapest next steps.
+
 Scope, stated honestly: this shares the **interpreter**, which is where the memory
 goes. Per-tab overlay DOM still lives in the tab, because moving UI into the
 engine would make `Overlay`/`Page` async for every app. That migration is the open

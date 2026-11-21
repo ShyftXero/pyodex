@@ -53,24 +53,45 @@ async function startApp(py) {
   await py.runPythonAsync(code);
 }
 
-async function dispatchAttach(tabId, url) {
-  if (tabId == null) return { ok: false, error: "no tab id" };
-  tabs.set(tabId, url);
+const pending = []; // tabs that attached before the app was ready
+
+function recordError(where, e) {
+  const text = `${where}: ${String(e && e.message || e).slice(0, 1200)}`;
+  console.error("[pyodex]", text);
+  // The offscreen document has no console a human will look at; persist instead.
+  chrome.storage.local.set({ __pyodexEngineError: text }).catch(() => {});
+}
+
+async function castAttach(py, tabId, url) {
+  await py.runPythonAsync(
+    `import pyodex_runtime as _r; _r._engine_attached(${tabId}, ${JSON.stringify(url || "")})`
+  );
+}
+
+async function startOnce() {
   const py = await engine();
+  await startApp(py);
+  while (pending.length) {
+    const [tabId, url] = pending.shift();
+    await castAttach(py, tabId, url);
+  }
+}
+
+function dispatchAttach(tabId, url) {
+  if (tabId == null) return Promise.resolve({ ok: false, error: "no tab id" });
+  tabs.set(tabId, url);
+  // Respond immediately: booting Pyodide takes seconds, and an async response
+  // that outlives the message channel is dropped silently (we saw exactly that).
   if (!appStarted) {
     appStarted = true;
-    try {
-      await startApp(py);
-    } catch (e) {
-      return { ok: false, error: String(e && e.message || e).slice(0, 600) };
-    }
+    pending.push([tabId, url]);
+    startOnce().catch((e) => recordError("engine app", e));
+  } else {
+    engine()
+      .then((py) => castAttach(py, tabId, url))
+      .catch((e) => recordError("attach", e));
   }
-  try {
-    await py.runPythonAsync(`import pyodex_runtime as _r; _r._engine_attached(${tabId}, ${JSON.stringify(url || "")})`);
-    return { ok: true, bootId: BOOT_ID };
-  } catch (e) {
-    return { ok: false, error: String(e && e.message || e).slice(0, 600) };
-  }
+  return Promise.resolve({ ok: true, bootId: BOOT_ID, pending: true });
 }
 
 globalThis.pyodexEngine = {
