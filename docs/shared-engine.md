@@ -1,6 +1,6 @@
 # ADR: one shared interpreter for all tabs
 
-Status: **accepted direction, not implemented**. Supersedes the per-tab
+Status: **interpreter half implemented** (`engine = "shared"`, harness L8); UI/DOM migration still open, see *Migration plan* step 4. Supersedes the per-tab
 interpreter as the long-term architecture. `boot`/`triggers` remain as the
 interim mechanism.
 

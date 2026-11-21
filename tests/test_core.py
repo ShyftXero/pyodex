@@ -422,3 +422,20 @@ def test_remote_runtime_build(tmp_path):
     assert not (built / "pyodide" / "pyodide.asm.wasm").exists()
     assert (built / "pyodide" / "pyodide.mjs").exists()
     assert json.loads((built / "manifest.json").read_text())["background"]["service_worker"] == "bg.js"
+
+
+def test_shared_engine_wiring(tmp_path):
+    """engine = "shared" ships the offscreen host and asks for the permission."""
+    built, _ = _build(tmp_path, '[extension]\nname = "Shared"\nengine = "shared"\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert "offscreen" in manifest["permissions"]
+    assert manifest["background"]["service_worker"] == "bg.js"
+    assert (built / "engine.html").exists() and (built / "engine.js").exists()
+    assert "onConnect" in (built / "engine.js").read_text()
+
+
+def test_local_engine_is_default(tmp_path):
+    built, _ = _build(tmp_path, '[extension]\nname = "Local"\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert "offscreen" not in manifest.get("permissions", [])
+    assert not (built / "engine.js").exists()

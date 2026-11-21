@@ -1,0 +1,59 @@
+name: compat-sweep
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # nightly
+  workflow_dispatch:
+    inputs:
+      top:
+        description: "how many PyPI top packages to test"
+        default: "200"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: test top packages in Pyodide
+        run: uv run pyodex compat test --top ${{ github.event.inputs.top || '200' }} --shipped
+
+      - name: fail on regressions
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+
+          # Compare the freshly written registry against the committed one: a
+          # package that was good and is now bad is a regression we must see,
+          # not a number that quietly moves.
+          fresh = json.loads(Path("src/pyodex/compat.json").read_text())
+          base_raw = subprocess.run(
+              ["git", "show", "HEAD:src/pyodex/compat.json"], capture_output=True, text=True
+          ).stdout
+          base = json.loads(base_raw or "{}")
+          bad = [
+              f"{name}: {base[name]['status']} -> {entry['status']}"
+              for name, entry in fresh.items()
+              if base.get(name, {}).get("status") in ("good", "import-only")
+              and entry["status"] == "bad"
+          ]
+          if bad:
+              print("regressions:")
+              for line in bad:
+                  print("  -", line)
+              sys.exit(1)
+          print(f"no regressions across {len(fresh)} packages")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-registry
+          path: src/pyodex/compat.json

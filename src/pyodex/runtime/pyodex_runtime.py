@@ -502,6 +502,69 @@ class PageError(RuntimeError):
 
 
 # --------------------------------------------------------------------------- #
+# chrome.* (extension page context only)
+# --------------------------------------------------------------------------- #
+
+
+def _chrome_api(name: str) -> Any:
+    api = getattr(js.chrome, name, None)
+    if api is None:
+        raise RuntimeError(f"chrome.{name} is unavailable here (needs an extension page context)")
+    return api
+
+
+async def tabs_query(**query: Any) -> list[dict]:
+    """chrome.tabs.query from Python: [{'id', 'url', 'title', 'active'}]."""
+    tabs = await _chrome_api("tabs").query(jsobj(query) if query else jsobj({}))
+    return [dict(t.to_py()) if hasattr(t, "to_py") else dict(t) for t in tabs]
+
+
+async def storage_get(key: str, *, area: str = "local") -> Any:
+    store = getattr(_chrome_api("storage"), area)
+    result = await store.get(key)
+    value = getattr(result, key, None) if not hasattr(result, "to_py") else result.to_py().get(key)
+    if hasattr(value, "to_py"):
+        return value.to_py()
+    return value
+
+
+async def storage_set(key: str, value: Any, *, area: str = "local") -> None:
+    store = getattr(_chrome_api("storage"), area)
+    await store.set(jsobj({key: value}))
+
+
+def runtime_url(path: str) -> str:
+    """Resolve a packaged resource to its chrome-extension:// URL."""
+    return str(_chrome_api("runtime").getURL(path))
+
+
+async def shared_run(code: str) -> dict:
+    """Run Python in the shared engine (one interpreter for every tab).
+
+    The engine outlives tabs: sockets, caches and module state stay warm, and a
+    second tab costs no wasm boot. Requires `engine = "shared"` at build time.
+    """
+    reply = await js.chrome.runtime.sendMessage(jsobj({"kind": "pyodex-shared", "action": "run", "code": code}))
+    return reply.to_py() if hasattr(reply, "to_py") else dict(reply)
+
+
+async def shared_status() -> dict:
+    """{'ok', 'bootId', 'runs', 'ready'} for the shared engine."""
+    reply = await js.chrome.runtime.sendMessage(jsobj({"kind": "pyodex-engine-status"}))
+    return reply.to_py() if hasattr(reply, "to_py") else dict(reply)
+
+
+def set_badge(text: str, *, color: str = "#f43f5e") -> None:
+    """Toolbar badge for the current extension ('' clears it)."""
+    action = getattr(js.chrome, "action", None) or getattr(js.chrome, "browserAction", None)
+    if action is None:
+        raise RuntimeError("no action API in this context")
+    action.setBadgeText(jsobj({"text": text}))
+    if text:
+        action.setBadgeBackgroundColor(jsobj({"color": color}))
+
+
+# --------------------------------------------------------------------------- #
 # Networking
 # --------------------------------------------------------------------------- #
 

@@ -1,0 +1,6 @@
+[extension]
+name = "L8 Shared Engine"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+engine = "shared"

@@ -6,7 +6,8 @@ reloads, input() via window.prompt, and the capability probe's answers.
 
 import asyncio
 
-from pyodex_runtime import Overlay, on, save, status
+from pyodex_runtime import (Overlay, on, runtime_url, save, status, storage_get,
+                            storage_set, tabs_query)
 import pyodex_natural as nat
 
 ui = Overlay()
@@ -52,8 +53,20 @@ def ask() -> str:
         return f"err:{type(e).__name__}"
 
 
+async def chrome_probe() -> str:
+    try:
+        await storage_set("l43", "roundtrip")
+        got = await storage_get("l43")
+        tabs = await tabs_query()
+        url_ok = runtime_url("options.html").startswith("chrome-extension://")
+        return f"storage={got} tabs>0={len(tabs) > 0} url={int(url_ok)}"
+    except Exception as e:  # noqa: BLE001
+        return f"err:{type(e).__name__}:{str(e)[:40]}"
+
+
 async def run_all() -> None:
     res = {"pip": await install_pkg(), "fs": bump_persistent(), "input": ask()}
+    res["chrome"] = await chrome_probe()
     caps = nat.detect()
     res["caps"] = (f"jspi={int(bool(caps.get('jspi')))} "
                    f"wt={int(bool(caps.get('webtransport')))} "

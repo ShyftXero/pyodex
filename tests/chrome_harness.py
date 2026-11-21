@@ -271,6 +271,7 @@ LEVELS = [
     Level("L5", "l5-cache", "L5_cache", "blob cache: digests, no stale serve, opt-out", 5, ("primary",)),
     Level("L6", "l6-pagecache", "L6_pagecache", "shared CDN cache for other pages", 6, ("primary",)),
     Level("L7", "l7-remote", "L7_remote", "remote runtime streamed through the cache", 7, ("primary",)),
+    Level("L8", "l8-shared", "L8_shared", "one interpreter shared by every tab", 8, ("primary",)),
 ]
 
 
@@ -485,6 +486,8 @@ def check_l43(level, ctx, env, c: Checks) -> None:
     c.expect("input() surfaced a prompt", bool(dialogs), f"dialogs={dialogs!r}")
     c.expect("input() returned the value", "input=harness-input" in (txt or ""), f"text={txt!r}")
     c.expect("capability probe ran", "caps=" in (txt or "") and "jspi=1" in (txt or ""), f"text={txt!r}")
+    c.expect("chrome.* wrappers work from Python",
+             "chrome=storage=roundtrip" in (txt or ""), f"text={txt!r}")
 
 
 def check_l6(level, ctx, env, c: Checks) -> None:
@@ -565,6 +568,13 @@ def check_l5(level, ctx, env, c: Checks) -> None:
         c.expect("options page renders", "cache" in heading.lower(), f"heading={heading!r}")
         c.expect("options page lists the opt-out", rows >= 1, f"rows={rows}")
         opts.close()
+
+        pop = ctx.new_page()
+        pop.goto(origin + "/popup.html")
+        pop.wait_for_timeout(1200)
+        entries = pop.evaluate("() => document.getElementById('entries')?.textContent || ''")
+        c.expect("popup renders cache stats", entries.strip().isdigit(), f"entries={entries!r}")
+        pop.close()
     else:
         c.expect("options page reachable", False, "could not derive the extension origin")
 
@@ -598,6 +608,34 @@ def check_l7(level, ctx, env, c: Checks) -> None:
              f"count={BLOBS.count('python_stdlib.zip')}")
 
 
+def check_l8(level, ctx, env, c: Checks) -> None:
+    """Two tabs must be served by the same engine instance."""
+    import re
+
+    def boot_id(page, timeout=120):
+        text = wait_status(page, "shared boot=", timeout=timeout)
+        if not text:
+            return None, text
+        m = re.search(r"boot=([0-9a-z-]+)", text)
+        return (m.group(1) if m else None), text
+
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    first_id, first_text = boot_id(page)
+    c.expect("engine answered the first tab", bool(first_id), f"status={(first_text or '')[:200]!r}")
+    c.expect("engine ran Python", "py=3." in (first_text or ""), f"status={(first_text or '')[:200]!r}")
+
+    second = ctx.new_page()
+    second.goto(f"{env['base']}/plain.html")
+    second_id, second_text = boot_id(second)
+    c.expect("engine answered the second tab", bool(second_id), f"status={(second_text or '')[:200]!r}")
+    c.expect("both tabs share one interpreter", first_id is not None and first_id == second_id,
+             f"first={first_id} second={second_id}")
+    runs = [int(x) for x in re.findall(r"runs=(\d+)", (second_text or ""))]
+    c.expect("engine counted more than one run", bool(runs) and runs[0] >= 2, f"runs={runs}")
+    second.close()
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -608,6 +646,7 @@ CHECKS = {
     "L5": check_l5,
     "L6": check_l6,
     "L7": check_l7,
+    "L8": check_l8,
 }
 
 

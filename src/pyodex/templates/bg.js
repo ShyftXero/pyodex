@@ -32,6 +32,60 @@ async function handleBlob(url, explicitDigest = null) {
   return { handled: true, source, bytes: new Uint8Array(data), digest };
 }
 
+// ---- shared engine ------------------------------------------------------- //
+let enginePort = null;
+let engineReady = false;
+
+async function ensureEngine() {
+  if (enginePort) return enginePort;
+  const has = await chrome.offscreen.hasDocument?.();
+  if (!has) {
+    try {
+      await chrome.offscreen.createDocument({
+        url: "engine.html",
+        reasons: ["WORKERS"],
+        justification: "Host a single Pyodide interpreter shared by every tab.",
+      });
+    } catch (e) {
+      if (!String(e).includes("Only a single offscreen")) throw e;
+    }
+  }
+  return null;
+}
+
+function connectEngine() {
+  if (enginePort) return enginePort;
+  enginePort = chrome.runtime.connect({ name: "pyodex-engine" });
+  enginePort.onDisconnect.addListener(() => {
+    enginePort = null;
+    engineReady = false;
+  });
+  return enginePort;
+}
+
+function askEngine(msg, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    setTimeout(() => done({ ok: false, error: "engine timeout" }), timeoutMs);
+    try {
+      const port = connectEngine();
+      port.onMessage.addListener(function once(reply) {
+        port.onMessage.removeListener(once);
+        done(reply);
+      });
+      port.postMessage(msg);
+    } catch (e) {
+      done({ ok: false, error: String(e && e.message) });
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.kind === "pyodex-blob") {
     handleBlob(msg.url, msg.digest)
@@ -46,6 +100,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     handleBlob(msg.url, msg.digest)
       .then((r) => sendResponse({ ok: r.handled, source: r.source, reason: r.reason }))
       .catch((e) => sendResponse({ ok: false, reason: String(e && e.message) }));
+    return true;
+  }
+  if (msg?.kind === "pyodex-engine-ready") {
+    engineReady = true;
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg?.kind === "pyodex-shared") {
+    ensureEngine()
+      .then(() => askEngine({ kind: msg.action || "run", code: msg.code }))
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: String(e && e.message) }));
+    return true;
+  }
+  if (msg?.kind === "pyodex-engine-status") {
+    askEngine({ kind: "status" }, 8000).then(sendResponse);
     return true;
   }
   if (msg?.kind === "pyodex-stats") {

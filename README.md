@@ -341,6 +341,36 @@ clear/import/export. Opting a host out purges its entries immediately.
 Proven by harness level L5: one network request for a blob across two page loads,
 refetch on digest mismatch, and a re-fetch on every load once the host opts out.
 
+## Shared interpreter (experimental)
+
+By default every tab that runs the extension has its own interpreter — isolation
+and per-tab DOM, at tens of MB per tab. `engine = "shared"` adds a single
+offscreen interpreter for the whole browser: sockets, caches and module state stay
+warm, and a second tab costs no wasm boot.
+
+```toml
+[extension]
+engine = "shared"
+```
+
+```python
+from pyodex_runtime import shared_run, shared_status
+
+info = await shared_run("import sys; sys.version_info[:2]")
+print(info["value"], (await shared_status())["bootId"])
+```
+
+The engine is an offscreen document (`engine.html`) held by the service worker.
+Tabs reach it over the worker; the boot id in `shared_status()` identifies the
+instance, so two tabs returning the same id proves they share it — that is what
+harness level L8 asserts.
+
+Scope, stated honestly: this shares the **interpreter**, which is where the memory
+goes. Per-tab overlay DOM still lives in the tab, because moving UI into the
+engine would make `Overlay`/`Page` async for every app. That migration is the open
+question in [`docs/shared-engine.md`](docs/shared-engine.md) and is deliberately
+not done yet.
+
 ## Networking: what the browser actually allows
 
 Python expects sockets; a browser page cannot open one. Chrome's options, and
@@ -464,6 +494,7 @@ Six extensions, each built from a fixture and loaded into a real browser:
 | L5 cache | digest-verified blob cache, no stale serving, per-site opt-out + options UI |
 | L6 page cache | other pages' Pyodide CDN fetches served from the extension's cache |
 | L7 remote runtime | loader-only package; wasm + stdlib streamed once, then cached |
+| L8 shared engine | one interpreter serving two tabs (same boot id) |
 
 ```
 uv run tests/chrome_harness.py                # all levels, parallel

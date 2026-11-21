@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{NAME}}</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; width: 320px; padding: 14px 16px;
+           font: 13px/1.5 system-ui, -apple-system, sans-serif; background: #0b0b0d; color: #f4f4f5; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #27272a; }
+    .row span:last-child { color: #a1a1aa; }
+    button { margin-top: 12px; width: 100%; padding: 7px; border-radius: 6px; cursor: pointer;
+             border: 1px solid #3f3f46; background: #18181b; color: inherit; font: inherit; }
+    button:hover { border-color: #71717a; }
+  </style>
+</head>
+<body>
+  <h1>{{NAME}}</h1>
+  <div class="row"><span>Cached blobs</span><span id="entries">–</span></div>
+  <div class="row"><span>Storage used</span><span id="usage">–</span></div>
+  <div class="row"><span>Opted-out hosts</span><span id="hosts">–</span></div>
+  <button id="options">Settings</button>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

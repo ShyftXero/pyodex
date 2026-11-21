@@ -59,6 +59,10 @@ class ExtConfig:
     # "bundled" ships the whole runtime. A URL base (e.g. .../pyodide/v314.0.8/full)
     # ships only the JS loader and streams the large binaries through the cache.
     runtime_base: str = "bundled"
+    popup: bool = True  # action popup showing cache status, linking to options
+    # "local": one interpreter per tab (isolation, per-tab DOM, higher memory).
+    # "shared": one interpreter for the browser in an offscreen document.
+    engine: str = "local"
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
@@ -122,6 +126,8 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         page_cache=ext.get("page_cache", True),
         page_cache_hosts=ext.get("page_cache_hosts", ["cdn.jsdelivr.net"]),
         runtime_base=ext.get("runtime_base", "bundled"),
+        popup=ext.get("popup", True),
+        engine=ext.get("engine", "local"),
         boot=_boot_mode(ext),
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
@@ -218,12 +224,18 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
         m["host_permissions"] = cfg.host_permissions
     if cfg.icon:
         m["icons"] = {"128": cfg.icon}
+    if cfg.cache and cfg.popup:
+        m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
+    perms: list[str] = []
     if cfg.cache:
         m["options_ui"] = {"page": "options.html", "open_in_tab": True}
-        # Chrome requires this for chrome.storage, which holds the opt-out list.
-        m["permissions"] = ["storage"]
-    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled":
+        perms.append("storage")  # chrome.storage holds the cache opt-out list
+    if cfg.engine == "shared":
+        perms.append("offscreen")  # hosts the single shared interpreter
+    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled" or cfg.engine == "shared":
         m["background"] = {"service_worker": "bg.js", "type": "module"}
+    if perms:
+        m["permissions"] = perms
         # The shim needs the page's own fetch, so it runs in the MAIN world; the
         # relay stays isolated because MAIN-world code cannot use chrome.* APIs.
         m["content_scripts"].append(
@@ -316,10 +328,13 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
     shutil.copy2(RUNTIME / "pyodex_natural.py", out / "pyodex_natural.py")
     if cfg.cache:
-        for name in ("cache.js", "options.html", "options.js"):
+        for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled":
+    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled" or cfg.engine == "shared":
         shutil.copy2(TEMPLATES / "bg.js", out / "bg.js")
+    if cfg.engine == "shared":
+        for name in ("engine.html", "engine.js"):
+            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
     if cfg.page_cache and cfg.page_cache_hosts:
         (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
         (out / "pagemain.js").write_text(
