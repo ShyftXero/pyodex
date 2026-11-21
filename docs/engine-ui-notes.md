@@ -17,9 +17,35 @@ L9 is experimental and excluded from the gate.
   `Overlay.button()` sends a `ui_button` op to the tab agent instead of drawing
   locally, so the API stays synchronous for app authors.
 
+## Fixed while digging
+
+- The engine-mode block called `runDomOp`, which lived inside the *other* IIFE and
+  was therefore out of scope in engine mode. Every DOM op failed with
+  `runDomOp is not defined`. The op implementation is now hoisted to file scope.
+- `Overlay.button()` at import time crashed because no tab had attached yet
+  (`currentTabId()` is null). Widget creation without an ambient tab is now a
+  no-op; a widget is per-tab, so creating it in `on_attach` is the correct shape.
+- `chrome.offscreen.createDocument` inside a message handler raced the response
+  channel; the document is now created eagerly at worker startup.
+
+## Proven hops (each tested in isolation)
+
+| Hop | Result |
+|---|---|
+| content script → worker (attach) | message arrives (instrumented counter) |
+| service worker → offscreen engine | answered: `{ok, bootId, ready}` |
+| worker → content script (tab op) | `{"ok":true,"payload":2}` |
+| engine boot | `ready: true`, `engine_mode() == True` |
+
 ## What does not work
 
-The worker→engine hop for *app traffic*. Observed, precisely:
+The app never starts in the engine. Probe from inside the engine:
+`repr((len(_ATTACH_HANDLERS), engine_mode()))` → `(0, True)`. Zero handlers means
+`app/main.py` was never executed, which means `startOnce()` did not run, which
+means `dispatchAttach()` was not called for the real content-script attach —
+even though every hop above works when driven manually.
+
+Earlier observed, precisely:
 
 - The content script's `pyodex-attach` message **does** reach the worker (proved by
   a counter written from inside the listener).

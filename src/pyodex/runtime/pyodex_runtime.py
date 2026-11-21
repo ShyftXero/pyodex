@@ -417,9 +417,13 @@ class Overlay:
 
     def _engine_op(self, op: str, args: dict) -> None:
         eng = _engine()
-        tab = int(eng.currentTabId())
+        raw = eng.currentTabId()
+        if raw is None:
+            # No tab has attached yet (this is import time). A widget created
+            # before its tab exists is a no-op rather than a crash.
+            return
         # Fire-and-forget: UI creation must not make every app's code async.
-        eng.tabOp(tab, op, jsobj(args))
+        eng.tabOp(int(raw), op, jsobj(args))
 
     def button(self, label: str, *, top: int | None = None, left: int | None = None,
                right: int | None = None, bottom: int | None = None, id: str | None = None) -> Any:

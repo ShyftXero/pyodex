@@ -70,6 +70,9 @@ async function castAttach(py, tabId, url) {
 
 async function startOnce() {
   const py = await engine();
+  // pyodex_runtime reports Python failures here; without it the offscreen
+  // document swallows tracebacks nobody can see.
+  globalThis.pyodexReportError = (msg) => recordError("python", msg);
   await startApp(py);
   while (pending.length) {
     const [tabId, url] = pending.shift();
