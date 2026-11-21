@@ -56,6 +56,9 @@ class ExtConfig:
     # Restricted to these hosts, and disabled per site by the opt-out list.
     page_cache: bool = True
     page_cache_hosts: list[str] = field(default_factory=lambda: ["cdn.jsdelivr.net"])
+    # "bundled" ships the whole runtime. A URL base (e.g. .../pyodide/v314.0.8/full)
+    # ships only the JS loader and streams the large binaries through the cache.
+    runtime_base: str = "bundled"
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
@@ -118,6 +121,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         cache=ext.get("cache", True),
         page_cache=ext.get("page_cache", True),
         page_cache_hosts=ext.get("page_cache_hosts", ["cdn.jsdelivr.net"]),
+        runtime_base=ext.get("runtime_base", "bundled"),
         boot=_boot_mode(ext),
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
@@ -218,7 +222,7 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
         m["options_ui"] = {"page": "options.html", "open_in_tab": True}
         # Chrome requires this for chrome.storage, which holds the opt-out list.
         m["permissions"] = ["storage"]
-    if cfg.page_cache and cfg.page_cache_hosts:
+    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled":
         m["background"] = {"service_worker": "bg.js", "type": "module"}
         # The shim needs the page's own fetch, so it runs in the MAIN world; the
         # relay stays isolated because MAIN-world code cannot use chrome.* APIs.
@@ -243,7 +247,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     pyo_src = ensure_pyodide(cfg.pyodide_version)
     pyo_dst = out / "pyodide"
     pyo_dst.mkdir()
-    for name in PYODIDE_CORE_FILES:
+    remote = cfg.runtime_base != "bundled"
+    bundled = ("pyodide.mjs", "pyodide.asm.mjs", "pyodide-lock.json") if remote else PYODIDE_CORE_FILES
+    for name in bundled:
         p = pyo_src / name
         if p.exists():
             shutil.copy2(p, pyo_dst / name)
@@ -312,8 +318,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     if cfg.cache:
         for name in ("cache.js", "options.html", "options.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-    if cfg.page_cache and cfg.page_cache_hosts:
+    if (cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled":
         shutil.copy2(TEMPLATES / "bg.js", out / "bg.js")
+    if cfg.page_cache and cfg.page_cache_hosts:
         (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
         (out / "pagemain.js").write_text(
             _render((TEMPLATES / "pagemain.js").read_text(),
@@ -335,6 +342,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
         "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
         "MAX_LIVE": str(int(cfg.max_live)),
+        "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
         "TRIGGERS": json.dumps(cfg.triggers),
     }
     for t in ("overlay.html", "bootstrap.js", "injector.js"):
@@ -345,6 +353,21 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         from .version import chrome_version, datever as _datever
 
         cfg.version = chrome_version(_datever())
+    if remote:
+        # Pin the exact bytes we expect from the remote base. The lockfile does not
+        # describe the core files, and a digest taken from our own verified copy is
+        # a stronger claim than anything fetched at runtime.
+        import hashlib
+
+        streamed = [n for n in PYODIDE_CORE_FILES if n not in bundled and (pyo_src / n).exists()]
+        runtime = {
+            "base": cfg.runtime_base.rstrip("/"),
+            "files": {n: hashlib.sha256((pyo_src / n).read_bytes()).hexdigest() for n in streamed},
+        }
+        (out / "runtime.json").write_text(json.dumps(runtime, indent=2) + "\n")
+        resources.append("runtime.json")
+        print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
+
     (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
     return out
 

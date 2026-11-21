@@ -25,8 +25,8 @@ async function expectedDigest(url) {
   }
 }
 
-async function handleBlob(url) {
-  const digest = await expectedDigest(url);
+async function handleBlob(url, explicitDigest = null) {
+  const digest = explicitDigest || (await expectedDigest(url));
   if (!digest) return { handled: false, reason: "unverified" };
   const { data, source } = await cachedFetch(url, digest);
   return { handled: true, source, bytes: new Uint8Array(data), digest };
@@ -34,10 +34,19 @@ async function handleBlob(url) {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.kind === "pyodex-blob") {
-    handleBlob(msg.url)
+    handleBlob(msg.url, msg.digest)
       .then(sendResponse)
       .catch((e) => sendResponse({ handled: false, reason: String(e && e.message) }));
     return true; // async response
+  }
+  if (msg?.kind === "pyodex-ensure") {
+    // Populate the cache and report where the bytes came from. The page then
+    // reads Cache Storage directly: shipping a 10 MB wasm through sendMessage
+    // blows past the 64 MiB message limit once structured-clone copies are made.
+    handleBlob(msg.url, msg.digest)
+      .then((r) => sendResponse({ ok: r.handled, source: r.source, reason: r.reason }))
+      .catch((e) => sendResponse({ ok: false, reason: String(e && e.message) }));
+    return true;
   }
   if (msg?.kind === "pyodex-stats") {
     sendResponse({ stats, hosts: null });

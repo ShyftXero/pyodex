@@ -409,3 +409,16 @@ def test_page_cache_can_be_disabled(tmp_path):
     manifest = json.loads((built / "manifest.json").read_text())
     assert "background" not in manifest
     assert not (built / "pagemain.js").exists()
+
+
+def test_remote_runtime_build(tmp_path):
+    """A remote runtime base ships the loader only, and pins what it streams."""
+    built, _ = _build(tmp_path, '[extension]\nname = "Remote"\nruntime_base = "https://cdn.example/pyodide/v314.0.8/full"\n')
+    runtime = json.loads((built / "runtime.json").read_text())
+    assert runtime["base"] == "https://cdn.example/pyodide/v314.0.8/full"
+    assert "pyodide.asm.wasm" in runtime["files"] and "python_stdlib.zip" in runtime["files"]
+    assert len(runtime["files"]["pyodide.asm.wasm"]) == 64  # sha256 hex
+    # The large binaries must NOT be in the package.
+    assert not (built / "pyodide" / "pyodide.asm.wasm").exists()
+    assert (built / "pyodide" / "pyodide.mjs").exists()
+    assert json.loads((built / "manifest.json").read_text())["background"]["service_worker"] == "bg.js"

@@ -109,6 +109,7 @@ class Blobs:
 
 
 BLOBS = Blobs()
+PYODIDE_DIR = Path.home() / ".cache" / "pyodex" / "pyodide-314.0.8"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -118,6 +119,21 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("content-type", "application/octet-stream")
             self.send_header("cache-control", "no-store")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/cdn/full/"):
+            name = self.path.rsplit("/", 1)[-1].split("?")[0]
+            src = PYODIDE_DIR / name
+            if not src.exists():
+                self.send_error(404, f"no {name}")
+                return
+            BLOBS.payload(name)  # count the request
+            body = src.read_bytes()
+            self.send_response(200)
+            self.send_header("content-type", "application/octet-stream")
+            self.send_header("access-control-allow-origin", "*")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -254,6 +270,7 @@ LEVELS = [
     Level("L4.3", "l4-3-runtime", "L4_3_runtime", "runtime pip, persistence, input(), caps", 4, ("primary",)),
     Level("L5", "l5-cache", "L5_cache", "blob cache: digests, no stale serve, opt-out", 5, ("primary",)),
     Level("L6", "l6-pagecache", "L6_pagecache", "shared CDN cache for other pages", 6, ("primary",)),
+    Level("L7", "l7-remote", "L7_remote", "remote runtime streamed through the cache", 7, ("primary",)),
 ]
 
 
@@ -558,6 +575,29 @@ def check_l5(level, ctx, env, c: Checks) -> None:
              f"before={second_b} after={BLOBS.count('b')}")
 
 
+def check_l7(level, ctx, env, c: Checks) -> None:
+    """Extension ships no wasm; boot streams it once, then serves from cache."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    booted = wait_status(page, "remote boot")
+    c.expect("booted with a remote runtime", bool(booted), f"status={status_now(page)[:200]!r}")
+    c.expect("wasm came from the network", BLOBS.count("pyodide.asm.wasm") == 1,
+             f"count={BLOBS.count('pyodide.asm.wasm')}")
+    c.expect("stdlib came from the network", BLOBS.count("python_stdlib.zip") == 1,
+             f"count={BLOBS.count('python_stdlib.zip')}")
+    c.expect("first load reports network", "wasm=network" in (booted or ""),
+             f"status={(booted or '')[:200]!r}")
+
+    page.reload()
+    again = wait_status(page, "remote boot")
+    c.expect("rebooted from cache", bool(again) and "cache" in (again or ""),
+             f"status={status_now(page)[:200]!r}")
+    c.expect("wasm was not re-fetched", BLOBS.count("pyodide.asm.wasm") == 1,
+             f"count={BLOBS.count('pyodide.asm.wasm')}")
+    c.expect("stdlib was not re-fetched", BLOBS.count("python_stdlib.zip") == 1,
+             f"count={BLOBS.count('python_stdlib.zip')}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -567,6 +607,7 @@ CHECKS = {
     "L4.3": check_l43,
     "L5": check_l5,
     "L6": check_l6,
+    "L7": check_l7,
 }
 
 
@@ -583,6 +624,11 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+    toml = dst / "pyodex.toml"
+    if toml.exists() and "%BASE%" in toml.read_text():
+        # localhost, not 127.0.0.1: extension pages are secure contexts and Chrome
+        # treats localhost as potentially trustworthy for mixed-content purposes.
+        toml.write_text(toml.read_text().replace("%BASE%", f"http://localhost:{ports['http']}"))
     main = dst / "main.py"
     src_text = main.read_text()
     if "%PORTS%" in src_text:

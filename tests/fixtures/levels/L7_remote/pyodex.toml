@@ -1,0 +1,7 @@
+[extension]
+name = "L7 Remote Runtime"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+# Ship only the JS loader; the ~16 MB of wasm + stdlib stream through the cache.
+runtime_base = "%BASE%/cdn/full"

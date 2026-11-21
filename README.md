@@ -288,6 +288,31 @@ data, source = await nat.cache_fetch(url, expected_sha256)   # source: "cache" |
 await nat.cache_set_no_sites(["*.example.com"])              # purges that host
 ```
 
+### Streaming the runtime instead of bundling it
+
+By default the package ships the whole runtime (~22 MB). Point `runtime_base` at a
+Pyodide CDN directory and only the JS loader ships (~1.6 MB); the wasm and stdlib
+stream through the cache on first load and come from disk afterwards.
+
+```toml
+[extension]
+runtime_base = "https://cdn.jsdelivr.net/pyodide/v314.0.8/full"
+```
+
+The build pins a SHA-256 for every streamed file in `runtime.json` (the lockfile
+does not describe the core files, and pinning the bytes our build was tested with
+is the stronger claim). Two constraints shape the implementation:
+
+- **The loader stays local.** MV3 forbids remote code, so `pyodide.mjs` cannot be
+  imported from the CDN — only *assets* stream.
+- **Fetches go through the service worker, and the page reads Cache Storage
+  directly.** An extension page is a secure context (mixed-content rules apply to
+  plain-HTTP bases), and passing a 10 MB wasm through `runtime.sendMessage`
+  overflows the 64 MiB message limit.
+
+Proven by harness level L7: boots from a remote base, one fetch each for wasm and
+stdlib, and a reload that re-fetches neither.
+
 ### Serving other pages' Pyodide fetches
 
 Installing the extension also short-circuits the Pyodide CDN for *any* page. A
@@ -438,6 +463,7 @@ Six extensions, each built from a fixture and loaded into a real browser:
 | L4.3 runtime | micropip at runtime, persistent dir, `input()` via prompt, capability probe |
 | L5 cache | digest-verified blob cache, no stale serving, per-site opt-out + options UI |
 | L6 page cache | other pages' Pyodide CDN fetches served from the extension's cache |
+| L7 remote runtime | loader-only package; wasm + stdlib streamed once, then cached |
 
 ```
 uv run tests/chrome_harness.py                # all levels, parallel

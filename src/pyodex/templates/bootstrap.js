@@ -1,8 +1,11 @@
 // Boots Pyodide from the extension's local pyodide/ folder, installs the
 // pyodex runtime helper and the app's Python files into the virtual FS, then
 // runs app/main.py.
-import { loadPyodide } from "./pyodide/pyodide.mjs";
 import * as pyodexCache from "./cache.js";
+// NOTE: pyodide.mjs is imported lazily inside boot(). It captures a reference to
+// fetch at import time, so the remote-runtime fetch interception must be
+// installed *before* the module loads, or the big binaries go straight to the
+// network (and 404, since they are intentionally not bundled).
 
 const status = document.getElementById("pyodex-status");
 const setStatus = (text, isError = false) => {
@@ -73,8 +76,56 @@ window.pyodexCacheBytes = async (url, digest) => {
 // Python reports background-task failures here (see pyodex_runtime._task_done).
 window.pyodexReportError = (msg) => showError(new Error(msg), "Python error");
 
+const REMOTE_RUNTIME = {{REMOTE_RUNTIME}};
+
+// With a remote runtime base, the big binaries (wasm + stdlib, ~16 MB) are not in
+// the extension package. They cannot be imported as modules from the remote base
+// (MV3 forbids remote code), so the loader stays local and only *asset* fetches
+// are redirected through the blob cache: first load pays once, later loads are local.
+async function remoteRuntime() {
+  const spec = JSON.parse(await fetchText("runtime.json"));
+  const localBase = chrome.runtime.getURL("pyodide/"); // loader stays bundled
+  const fetchImpl = window.fetch;
+  window.fetch = async (input, init) => {
+    // The loader may pass a string, a URL, or a Request, and may use relative
+    // paths — resolve first, then decide by filename.
+    let name = null;
+    try {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+      if (raw) {
+        const abs = new URL(raw, location.href);
+        if (abs.protocol === "chrome-extension:") name = abs.pathname.split("/").pop();
+      }
+    } catch {
+      /* fall through to the network */
+    }
+    const digest = name ? spec.files[name] : null;
+    if (digest) {
+      const url = `${spec.base}/${name}`;
+      // The worker populates the cache; we read it back here. Never ship the
+      // bytes through messaging — a 10 MB wasm overflows the 64 MiB limit.
+      const res = await chrome.runtime.sendMessage({ kind: "pyodex-ensure", url, digest });
+      if (!res || !res.ok) throw new Error(`runtime blob refused: ${res?.reason || "unknown"}`);
+      const cache = await caches.open("pyodex-blobs-v1");
+      const hit = await cache.match(url);
+      if (!hit) throw new Error(`cache miss for ${name} after ensure`);
+      window.pyodexRuntimeStats = { ...(window.pyodexRuntimeStats || {}), [name]: res.source };
+      // WebAssembly.instantiateStreaming requires the wasm MIME type; the cached
+      // response carries whatever the origin sent.
+      return new Response(hit.body, {
+        status: 200,
+        headers: { "content-type": name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" },
+      });
+    }
+    return fetchImpl.apply(window, [input, init]);
+  };
+  return localBase;
+}
+
 async function boot() {
-  const pyodide = await loadPyodide({ indexURL: chrome.runtime.getURL("pyodide/") });
+  const indexURL = REMOTE_RUNTIME ? await remoteRuntime() : chrome.runtime.getURL("pyodide/");
+  const { loadPyodide } = await import("./pyodide/pyodide.mjs");
+  const pyodide = await loadPyodide({ indexURL });
   window.pyodide = pyodide;
 
   // Runtime helper importable as `pyodex_runtime`.
