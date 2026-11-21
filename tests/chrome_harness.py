@@ -67,8 +67,38 @@ PLAIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plain</t
 # --------------------------------------------------------------------------- #
 
 
+class Blobs:
+    """Serves immutable-ish blobs and counts requests, for the cache level."""
+
+    def __init__(self) -> None:
+        self.hits: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def payload(self, key: str) -> bytes:
+        with self._lock:
+            self.hits[key] = self.hits.get(key, 0) + 1
+            n = self.hits[key]
+        return f"blob:{key}:v1".encode() + b"x" * 2048
+
+    def count(self, key: str) -> int:
+        with self._lock:
+            return self.hits.get(key, 0)
+
+
+BLOBS = Blobs()
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
+        if self.path.startswith("/blob/"):
+            body = BLOBS.payload(self.path.rsplit("/", 1)[-1].split("?")[0])
+            self.send_response(200)
+            self.send_header("content-type", "application/octet-stream")
+            self.send_header("cache-control", "no-store")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.startswith("/json"):
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
@@ -177,6 +207,7 @@ LEVELS = [
     Level("L4.1", "l4-1-web", "L4_1_web", "gate, 2 tabs, keep_alive, traceback", 4, ("primary",)),
     Level("L4.2", "l4-2-net", "L4_2_net", "requests, TCP, proxy TLS, WebSocket", 4, ("primary", "echo", "tls", "ws")),
     Level("L4.3", "l4-3-runtime", "L4_3_runtime", "runtime pip, persistence, input(), caps", 4, ("primary",)),
+    Level("L5", "l5-cache", "L5_cache", "blob cache: digests, no stale serve, opt-out", 5, ("primary",)),
 ]
 
 
@@ -225,8 +256,14 @@ def overlay_frame(page, timeout: int = BOOT_TIMEOUT):
 
 
 def frame_text(frame) -> str:
+    """Text of the overlay, including hidden nodes.
+
+    `innerText` honours CSS visibility, so a status pill that bootstrap hid after
+    main.py returned reads as empty even though Python wrote to it. `textContent`
+    is what tests want here.
+    """
     try:
-        return frame.evaluate("() => document.body.innerText || ''")
+        return frame.evaluate("() => document.body?.textContent || ''")
     except Exception:  # noqa: BLE001
         return ""
 
@@ -247,6 +284,27 @@ def wait_for(predicate, timeout_s: float = 30, interval: float = 0.2):
 # --------------------------------------------------------------------------- #
 # per-level assertions
 # --------------------------------------------------------------------------- #
+
+
+def status_now(page) -> str:
+    """Current overlay status text (never the matched value: diagnostics on failure)."""
+    frame = overlay_frame(page, 5000)
+    return frame_text(frame) if frame else ""
+
+
+def wait_status(page, needle: str, timeout: float = 90):
+    """Wait for the overlay's status text to contain `needle`.
+
+    Re-resolves the frame on every probe: after a navigation the previous frame
+    object is detached and evaluates to an empty string forever.
+    """
+
+    def probe():
+        frame = overlay_frame(page, 5000)
+        text = frame_text(frame) if frame else ""
+        return text if needle in text else None
+
+    return wait_for(probe, timeout)
 
 
 def check_l1(level, ctx, env, c: Checks) -> None:
@@ -366,6 +424,55 @@ def check_l43(level, ctx, env, c: Checks) -> None:
     c.expect("capability probe ran", "caps=" in (txt or "") and "jspi=1" in (txt or ""), f"text={txt!r}")
 
 
+def check_l5(level, ctx, env, c: Checks) -> None:
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/login.html?mode=fetch")
+    first = wait_status(page, "fetch src=")
+    c.expect("first load fetched from network", bool(first) and "src=network" in (first or ""),
+             f"status={(first or '')[:120]!r}")
+    c.expect("server saw exactly one request", BLOBS.count("a") == 1, f"count={BLOBS.count('a')}")
+
+    page.reload()
+    cached = wait_status(page, "src=cache")
+    c.expect("reload served from cache", bool(cached), f"status={status_now(page)[:160]!r}")
+    c.expect("no second network request", BLOBS.count("a") == 1, f"count={BLOBS.count('a')}")
+
+    before = BLOBS.count("a")
+    page.goto(f"{env['base']}/login.html?mode=tamper")
+    tampered = wait_status(page, "tamper")
+    c.expect("mismatched digest is refused, not served", bool(tampered) and "tamper err=" in (tampered or ""),
+             f"status={status_now(page)[:200]!r}")
+    c.expect("mismatch caused a refetch", BLOBS.count("a") > before,
+             f"before={before} after={BLOBS.count('a')}")
+
+    page.goto(f"{env['base']}/login.html?mode=optout")
+    opted = wait_status(page, "optout src=")
+    c.expect("opted-out host is not cached", bool(opted) and "src=network" in (opted or ""),
+             f"status={status_now(page)[:200]!r}")
+    c.expect("opt-out list is persisted", bool(opted) and "127.0.0.1" in (opted or ""),
+             f"status={status_now(page)[:200]!r}")
+
+    frame_url = (overlay_frame(page, 5000) or page).url if overlay_frame(page, 5000) else ""
+    origin = frame_url.rsplit("/", 1)[0] if frame_url else ""
+    if origin:
+        opts = ctx.new_page()
+        opts.goto(origin + "/options.html")
+        opts.wait_for_timeout(1500)
+        rows = opts.evaluate("() => document.querySelectorAll('#rows tr').length")
+        heading = opts.evaluate("() => document.querySelector('h1')?.textContent || ''")
+        c.expect("options page renders", "cache" in heading.lower(), f"heading={heading!r}")
+        c.expect("options page lists the opt-out", rows >= 1, f"rows={rows}")
+        opts.close()
+    else:
+        c.expect("options page reachable", False, "could not derive the extension origin")
+
+    second_b = BLOBS.count("b")
+    page.reload()
+    wait_status(page, "optout src=")
+    c.expect("opted-out host re-fetches every time", BLOBS.count("b") > second_b,
+             f"before={second_b} after={BLOBS.count('b')}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -373,6 +480,7 @@ CHECKS = {
     "L4.1": check_l41,
     "L4.2": check_l42,
     "L4.3": check_l43,
+    "L5": check_l5,
 }
 
 
@@ -393,6 +501,16 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
     src_text = main.read_text()
     if "%PORTS%" in src_text:
         main.write_text(src_text.replace("%PORTS%", repr(ports)))
+    if "%DIGEST_A%" in src_text:
+        import hashlib
+
+        digest_a = hashlib.sha256(b"blob:a:v1" + b"x" * 2048).hexdigest()
+        digest_other = hashlib.sha256(b"blob:a:v2" + b"x" * 2048).hexdigest()
+        main.write_text(
+            src_text.replace("%BASE%", f"http://127.0.0.1:{ports['http']}")
+            .replace("%DIGEST_A%", digest_a)
+            .replace("%DIGEST_BTAIL%", digest_other)
+        )
     return build_extension(dst, work / "dist" / level.slug)
 
 

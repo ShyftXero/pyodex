@@ -1,0 +1,5 @@
+[extension]
+name = "L5 Cache"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"

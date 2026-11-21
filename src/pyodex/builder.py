@@ -51,6 +51,7 @@ class ExtConfig:
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
     overlay_body: str = ""  # inline alternative to overlay.body.html
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
+    cache: bool = True  # digest-verified blob cache + per-site opt-out options page
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
@@ -110,6 +111,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         overlay_css=ext.get("overlay_css", ""),
         overlay_body=ext.get("overlay_body", ""),
         natural=ext.get("natural", True),
+        cache=ext.get("cache", True),
         boot=_boot_mode(ext),
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
@@ -206,6 +208,10 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
         m["host_permissions"] = cfg.host_permissions
     if cfg.icon:
         m["icons"] = {"128": cfg.icon}
+    if cfg.cache:
+        m["options_ui"] = {"page": "options.html", "open_in_tab": True}
+        # Chrome requires this for chrome.storage, which holds the opt-out list.
+        m["permissions"] = ["storage"]
     return m
 
 
@@ -289,6 +295,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     # 5. Runtime helper (python)
     shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
     shutil.copy2(RUNTIME / "pyodex_natural.py", out / "pyodex_natural.py")
+    if cfg.cache:
+        for name in ("cache.js", "options.html", "options.js"):
+            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
 
     # 6. Templates
     body = cfg.overlay_body or ((project / "overlay.body.html").read_text() if (project / "overlay.body.html").exists() else "")
