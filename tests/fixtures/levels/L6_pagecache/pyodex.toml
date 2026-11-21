@@ -1,0 +1,7 @@
+[extension]
+name = "L6 PageCache"
+matches = ["<all_urls>"]
+http = false
+# Serve other pages' Pyodide CDN fetches from this extension's cache.
+page_cache = true
+page_cache_hosts = ["127.0.0.1"]

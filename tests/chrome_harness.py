@@ -58,6 +58,24 @@ LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login</t
   <script>document.querySelector('form').addEventListener('submit', e => e.preventDefault());</script>
 </body></html>"""
 
+PAGE_CACHE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pyodide page</title></head>
+<body><h1>app that uses pyodide</h1><div id="net">pending</div>
+<script>
+  // Mimics what the Pyodide loader does: fetch a blob from the CDN path.
+  (async () => {
+    const url = "/pyodide/v314.0.8/full/demo-1.0.0-py3-none-any.whl";
+    try {
+      const r = await fetch(url);
+      const buf = await r.arrayBuffer();
+      const src = r.headers.get("x-pyodex-source") || "cdn";
+      document.getElementById("net").textContent = `source=${src} len=${buf.byteLength}`;
+    } catch (e) {
+      document.getElementById("net").textContent = "error=" + e.message;
+    }
+  })();
+</script>
+</body></html>"""
+
 PLAIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plain</title></head>
 <body><h1>Nothing to see</h1><p id="plain">plain page</p></body></html>"""
 
@@ -80,6 +98,11 @@ class Blobs:
             n = self.hits[key]
         return f"blob:{key}:v1".encode() + b"x" * 2048
 
+    def digest(self, key: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(f"blob:{key}:v1".encode() + b"x" * 2048).hexdigest()
+
     def count(self, key: str) -> int:
         with self._lock:
             return self.hits.get(key, 0)
@@ -99,6 +122,25 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.startswith("/pyodide/"):
+            if self.path.endswith("pyodide-lock.json"):
+                body = json.dumps({
+                    "info": {"version": "314.0.8"},
+                    "packages": {
+                        "demo": {"file_name": "demo-1.0.0-py3-none-any.whl",
+                                 "sha256": BLOBS.digest("wheel")},
+                    },
+                }).encode()
+            else:
+                body = BLOBS.payload("wheel")
+            self.send_response(200)
+            self.send_header("content-type", "application/octet-stream")
+            self.send_header("cache-control", "no-store")
+            self.send_header("access-control-allow-origin", "*")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.startswith("/json"):
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
@@ -107,7 +149,10 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        page = LOGIN_PAGE if self.path.startswith(("/login", "/boom")) else PLAIN_PAGE
+        if self.path.startswith("/pyodide-page"):
+            page = PAGE_CACHE_PAGE
+        else:
+            page = LOGIN_PAGE if self.path.startswith(("/login", "/boom")) else PLAIN_PAGE
         body = page.encode()
         self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
@@ -208,6 +253,7 @@ LEVELS = [
     Level("L4.2", "l4-2-net", "L4_2_net", "requests, TCP, proxy TLS, WebSocket", 4, ("primary", "echo", "tls", "ws")),
     Level("L4.3", "l4-3-runtime", "L4_3_runtime", "runtime pip, persistence, input(), caps", 4, ("primary",)),
     Level("L5", "l5-cache", "L5_cache", "blob cache: digests, no stale serve, opt-out", 5, ("primary",)),
+    Level("L6", "l6-pagecache", "L6_pagecache", "shared CDN cache for other pages", 6, ("primary",)),
 ]
 
 
@@ -424,6 +470,45 @@ def check_l43(level, ctx, env, c: Checks) -> None:
     c.expect("capability probe ran", "caps=" in (txt or "") and "jspi=1" in (txt or ""), f"text={txt!r}")
 
 
+def check_l6(level, ctx, env, c: Checks) -> None:
+    """A page's own Pyodide CDN fetch should be served from our cache."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/pyodide-page.html")
+    first = wait_for(lambda: page.inner_text("#net") if "source=" in page.inner_text("#net") else None, 30)
+    c.expect("first page load fetched from the network",
+             bool(first) and "source=network" in (first or ""), f"net={page.inner_text('#net')!r}")
+    c.expect("server saw one fetch", BLOBS.count("wheel") == 1, f"count={BLOBS.count('wheel')}")
+
+    second = ctx.new_page()
+    second.goto(f"{env['base']}/pyodide-page.html")
+    cached = wait_for(lambda: second.inner_text("#net") if "source=" in second.inner_text("#net") else None, 30)
+    c.expect("second page served from the extension's cache",
+             bool(cached) and "source=cache" in (cached or ""), f"net={second.inner_text('#net')!r}")
+    c.expect("CDN was not contacted again", BLOBS.count("wheel") == 1, f"count={BLOBS.count('wheel')}")
+    second.close()
+
+    # Opt this host out through the service worker, then confirm the page goes
+    # back to the network on every load.
+    workers = ctx.service_workers
+    if not workers:
+        c.expect("service worker reachable", False, "no MV3 service worker found")
+        return
+    before = BLOBS.count("wheel")
+    workers[0].evaluate("""async () => {
+        await chrome.storage.local.set({ pyodex_no_cache_hosts: ["127.0.0.1"] });
+        const cache = await caches.open("pyodex-blobs-v1");
+        for (const req of await cache.keys()) await cache.delete(req);
+    }""")
+    third = ctx.new_page()
+    third.goto(f"{env['base']}/pyodide-page.html")
+    again = wait_for(lambda: third.inner_text("#net") if "source=" in third.inner_text("#net") else None, 30)
+    c.expect("opted-out host goes back to the CDN",
+             bool(again) and "source=network" in (again or ""), f"net={third.inner_text('#net')!r}")
+    c.expect("opt-out caused a fetch", BLOBS.count("wheel") > before,
+             f"before={before} after={BLOBS.count('wheel')}")
+    third.close()
+
+
 def check_l5(level, ctx, env, c: Checks) -> None:
     page = ctx.new_page()
     page.goto(f"{env['base']}/login.html?mode=fetch")
@@ -481,6 +566,7 @@ CHECKS = {
     "L4.2": check_l42,
     "L4.3": check_l43,
     "L5": check_l5,
+    "L6": check_l6,
 }
 
 

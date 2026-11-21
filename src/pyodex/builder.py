@@ -52,6 +52,10 @@ class ExtConfig:
     overlay_body: str = ""  # inline alternative to overlay.body.html
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
     cache: bool = True  # digest-verified blob cache + per-site opt-out options page
+    # Serve *other pages'* Pyodide CDN requests from this extension's cache.
+    # Restricted to these hosts, and disabled per site by the opt-out list.
+    page_cache: bool = True
+    page_cache_hosts: list[str] = field(default_factory=lambda: ["cdn.jsdelivr.net"])
     # Boot policy: "user" (launcher click), "visible" (boot when the tab is
     # visible), "auto" (boot on every page load). Extensions that must act on
     # page load set "auto"; idle tabs should stay "user".
@@ -112,6 +116,8 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         overlay_body=ext.get("overlay_body", ""),
         natural=ext.get("natural", True),
         cache=ext.get("cache", True),
+        page_cache=ext.get("page_cache", True),
+        page_cache_hosts=ext.get("page_cache_hosts", ["cdn.jsdelivr.net"]),
         boot=_boot_mode(ext),
         idle_timeout=ext.get("idle_timeout", 600),
         reap_hidden_after=ext.get("reap_hidden_after", 300),
@@ -212,6 +218,14 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
         m["options_ui"] = {"page": "options.html", "open_in_tab": True}
         # Chrome requires this for chrome.storage, which holds the opt-out list.
         m["permissions"] = ["storage"]
+    if cfg.page_cache and cfg.page_cache_hosts:
+        m["background"] = {"service_worker": "bg.js", "type": "module"}
+        # The shim needs the page's own fetch, so it runs in the MAIN world; the
+        # relay stays isolated because MAIN-world code cannot use chrome.* APIs.
+        m["content_scripts"].append(
+            {"matches": cfg.matches, "js": ["pagebridge.js"], "run_at": "document_start"})
+        m["content_scripts"].append(
+            {"matches": cfg.matches, "js": ["pagemain.js"], "run_at": "document_start", "world": "MAIN"})
     return m
 
 
@@ -298,6 +312,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     if cfg.cache:
         for name in ("cache.js", "options.html", "options.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+    if cfg.page_cache and cfg.page_cache_hosts:
+        shutil.copy2(TEMPLATES / "bg.js", out / "bg.js")
+        (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
+        (out / "pagemain.js").write_text(
+            _render((TEMPLATES / "pagemain.js").read_text(),
+                    {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
 
     # 6. Templates
     body = cfg.overlay_body or ((project / "overlay.body.html").read_text() if (project / "overlay.body.html").exists() else "")

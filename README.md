@@ -288,7 +288,27 @@ data, source = await nat.cache_fetch(url, expected_sha256)   # source: "cache" |
 await nat.cache_set_no_sites(["*.example.com"])              # purges that host
 ```
 
-Caching is on by default (`cache = false` disables it). It is per-site opt-out:
+### Serving other pages' Pyodide fetches
+
+Installing the extension also short-circuits the Pyodide CDN for *any* page. A
+MAIN-world shim replaces `fetch` for the configured hosts; the request is relayed
+(isolated bridge -> service worker) and answered from local cache when the bytes
+match that version's `pyodide-lock.json` digest. Unverifiable requests fall
+through to the network, so a page never breaks because of us.
+
+```toml
+[extension]
+page_cache = true                          # default
+page_cache_hosts = ["cdn.jsdelivr.net"]    # narrow on purpose
+```
+
+Proven by harness level L6: the first page load fetches from the "CDN", a second
+page with the same profile is served from cache with **zero** CDN requests, and
+opting the host out sends both pages back to the network.
+
+### Opting out
+
+Caching is on by default (`cache = false` / `page_cache = false` disable it). It is per-site opt-out:
 the options page lists host patterns (`example.com`, `*.example.com`, `*`), and
 both the browser's storage estimate and a 200 MB budget are surfaced there, with
 clear/import/export. Opting a host out purges its entries immediately.
@@ -417,6 +437,7 @@ Six extensions, each built from a fixture and loaded into a real browser:
 | L4.2 net | `requests`, raw TCP over the proxy, proxy-terminated TLS, WebSocket |
 | L4.3 runtime | micropip at runtime, persistent dir, `input()` via prompt, capability probe |
 | L5 cache | digest-verified blob cache, no stale serving, per-site opt-out + options UI |
+| L6 page cache | other pages' Pyodide CDN fetches served from the extension's cache |
 
 ```
 uv run tests/chrome_harness.py                # all levels, parallel

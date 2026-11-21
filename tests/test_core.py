@@ -388,3 +388,24 @@ def test_cache_verifies_digests_and_honours_optout():
     assert "digest mismatch" in src          # loud failure, not a stale serve
     assert "await cache.delete(key)" in src  # eviction on mismatch
     assert "purgeOptedOut" in src            # opting out cleans up after itself
+
+
+def test_page_cache_wiring(tmp_path):
+    """A page's Pyodide CDN fetch is served by a MAIN-world shim + worker relay."""
+    built, _ = _build(tmp_path, '[extension]\nname = "PageCache"\npage_cache_hosts = ["cdn.jsdelivr.net"]\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert manifest["background"] == {"service_worker": "bg.js", "type": "module"}
+    worlds = {(c["js"][0], c.get("world", "ISOLATED"), c["run_at"]) for c in manifest["content_scripts"]}
+    assert ("pagemain.js", "MAIN", "document_start") in worlds
+    assert ("pagebridge.js", "ISOLATED", "document_start") in worlds
+    js = (built / "pagemain.js").read_text()
+    assert 'const HOSTS = ["cdn.jsdelivr.net"];' in js
+    # The worker has no document base: the shim must send absolute URLs.
+    assert "absolute = parsed.href" in js
+
+
+def test_page_cache_can_be_disabled(tmp_path):
+    built, _ = _build(tmp_path, '[extension]\nname = "NoPageCache"\npage_cache = false\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert "background" not in manifest
+    assert not (built / "pagemain.js").exists()
