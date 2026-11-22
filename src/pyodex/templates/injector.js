@@ -493,6 +493,7 @@
 
   // Announce this tab so the engine can address it. The reply is kept on window
   // so failures are diagnosable from DevTools (and by the test harness).
+  document.documentElement.dataset.pyodexEngineMode = "1";
   chrome.runtime.sendMessage({ kind: "pyodex-attach", url: location.href })
     .then((r) => { window.__pyodexAttach = r; })
     .catch((e) => { window.__pyodexAttach = { ok: false, error: String(e && e.message) }; });

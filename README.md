@@ -207,6 +207,46 @@ On build, `pyodex`:
 Packages Pyodide ships itself (numpy, pandas, cryptography, ...) are pinned to
 Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 
+## Novelty ledger
+
+What here is new, and what is the platform used well. This is a claim register, not
+marketing: it is **updated whenever prior art surfaces**, and entries move out of
+the first table when they do. Last reviewed 2026-11-21.
+
+### Believed novel (no prior art found yet)
+
+| Item | Why it seems new |
+|---|---|
+| PEP 723 script → loadable extension | One file with a `[tool.pyodex]` block becomes a dependency-resolved, digest-pinned Chrome extension. Nothing in the Pyodide ecosystem offers that contract. |
+| Compatibility gate from functional probes | ~50 packages imported **and exercised** inside real Pyodide, with the build refusing known-bad ones. haru-pack does this shape for native apps; for Pyodide packages we found no equivalent. Now run in **two engines**: Node for the broad sweep, Chrome's V8 (harness L10) for the twelve that matter most, because that is where extension Python actually runs. |
+| Serving other pages' Pyodide CDN fetches | A MAIN-world `fetch` shim plus a digest-verified worker cache answers third-party pages' Pyodide requests from local storage, keyed against that version's `pyodex-lock.json`, with per-site opt-out. Caching your own assets is ordinary; accelerating arbitrary pages from an extension is not something we can find. |
+| Build-time compilation of Python decorators | `@urlmatch(["*.mysite.com"])` / `@watch_for(...)` are extracted by AST at build time into structured page-side routing rules — no config, no JS authoring, and app code is never executed at build time. |
+| Unmodified stdlib sockets in an extension | `http.client`, `smtplib` and `redis-py` pass in real Chromium via a JSPI bridge with proxy-terminated TLS. websockify-shaped proxies exist; making stock Python work untouched inside an MV3 extension is the new part. |
+| Monotonicity as a trust invariant | The harness refuses to report green when a higher level passes while a lower one fails. That rule caught an overlay that no real user could click. |
+
+### Not novel (platform, used well)
+
+Pyodide and micropip; the WebSocket↔TCP proxy (websockify lineage); MV3 offscreen
+documents; Cache Storage; `chrome.storage`; Playwright-driven extension testing;
+`wasm-unsafe-eval` CSP for extension pages.
+
+### Deliberately avoided
+
+- **Remote code** (MV3 forbids it): the loader stays local, only assets stream.
+- **`chrome.debugger`/CDP to drive page DOM** from a shared interpreter. It works
+  and would remove the content-script hop, but costs a "debugging this browser"
+  infobar, a powerful permission, and store-review risk. The sanctioned agent is
+  slower per op and honest about it.
+- **Transpiling Python to JS** (pyvue/vue.py style). Your Python would not run at
+  runtime, which defeats the premise.
+
+### Open claims we have not proven
+
+- `ui = "engine"` (tabs hold no interpreter) — scaffolded, transport unfinished;
+  see `docs/engine-ui-notes.md`.
+- Per-tab memory is measured (`docs/memory.md`) only for the bundled runtime with
+  no wheels beyond the HTTP shims.
+
 ## Compatibility registry
 
 Like haru-pack's thick-app checks: a package is **good** only if a functional

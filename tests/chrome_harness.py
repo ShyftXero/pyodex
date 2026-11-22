@@ -275,6 +275,8 @@ LEVELS = [
     Level("L8", "l8-shared", "L8_shared", "one interpreter shared by every tab", 8, ("primary",)),
     Level("L9", "l9-engine-ui", "L9_engine_ui", "tabs hold no interpreter; engine drives them",
           9, ("primary",), experimental=True),
+    Level("L10", "l10-compat-chrome", "L10_compat_chrome", "compat probes in Chrome's V8, not just Node", 10,
+          ("primary",)),
 ]
 
 
@@ -663,6 +665,39 @@ def check_l9(level, ctx, env, c: Checks) -> None:
     second.close()
 
 
+def check_l10(level, ctx, env, c: Checks) -> None:
+    """The same functional probes, executed in Chrome's V8."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "src"))
+    from pyodex.compat import PROBES, status_of
+
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    text = wait_status(page, "L10 {")
+    if not c.expect("probes ran in the browser", bool(text), f"status={status_now(page)[:200]!r}"):
+        return
+    try:
+        results = json.loads(text.split("L10 ", 1)[1].strip())
+    except (json.JSONDecodeError, IndexError) as e:
+        c.expect("probe output parsed", False, f"{e}: {(text or '')[:200]!r}")
+        return
+
+    failures = {k: v for k, v in results.items() if v != "ok"}
+    c.expect("every probed package passes in Chrome", not failures, f"failures={failures}")
+
+    # Node and Chrome must agree with the shipped registry; a disagreement means
+    # one of the two environments is lying about a package.
+    disagree = []
+    for name, verdict in results.items():
+        registered, _ = status_of(name)
+        if verdict == "ok" and registered == "bad":
+            disagree.append(f"{name}: Chrome ok, registry bad")
+        if verdict != "ok" and registered == "good":
+            disagree.append(f"{name}: Chrome {verdict[:40]}, registry good")
+    c.expect("Chrome agrees with the Node-derived registry", not disagree, f"{disagree[:3]}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -675,6 +710,7 @@ CHECKS = {
     "L7": check_l7,
     "L8": check_l8,
     "L9": check_l9,
+    "L10": check_l10,
 }
 
 
@@ -683,13 +719,80 @@ CHECKS = {
 # --------------------------------------------------------------------------- #
 
 
+CHROME_PROBE_PACKAGES = [
+    "requests", "urllib3", "attrs", "packaging", "jinja2", "markupsafe",
+    "pyyaml", "click", "python-dateutil", "six", "pydantic", "numpy",
+]
+
+
+def _write_compat_fixture(dst: Path) -> None:
+    """Generate the probe fixture from pyodex.compat.PROBES.
+
+    The registry is the single source of truth: if a probe changes, the browser
+    run changes with it, so Node and Chrome can never diverge silently.
+    """
+    import json as _json
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "src"))
+    from pyodex.compat import PROBES
+
+    dst.mkdir(parents=True, exist_ok=True)
+    deps = [p for p in CHROME_PROBE_PACKAGES if p in PROBES]
+    (dst / "pyodex.toml").write_text(
+        "[extension]\n"
+        'name = "L10 Compat Chrome"\n'
+        'matches = ["<all_urls>"]\n'
+        "http = true\n"
+        'boot = "auto"\n'
+        "pyodide_packages = " + _json.dumps(deps) + "\n"
+    )
+    main = [
+        '"""Run the compatibility probes in Chrome V8 (Level 10).',
+        "",
+        "Same probe strings the Node sweep uses, executed in the browser instead:",
+        "that is where extension Python actually runs, and V8 differences (JIT,",
+        "wasm memory limits, JSPI) are exactly what a Node-only sweep cannot see.",
+        '"""',
+        "",
+        "import json",
+        "import traceback",
+        "",
+        "from pyodex_runtime import status",
+        "",
+        "URL = '" + "__URL__" + "'",
+        "PROBES = " + repr({p: PROBES[p] for p in deps}),
+        "",
+        "",
+        "def run_probe(name, code):",
+        "    ns = {'URL': URL}",
+        "    try:",
+        "        exec(compile(code, f'<{name}>', 'exec'), ns)",
+        "        return 'ok'",
+        "    except Exception as e:  # noqa: BLE001",
+        "        return f'{type(e).__name__}: {e}'[:220]",
+        "",
+        "",
+        "results = {name: run_probe(name, code) for name, code in PROBES.items()}",
+        "status('L10 ' + json.dumps(results))",
+        "",
+    ]
+    (dst / "main.py").write_text("\n".join(main))
+
+
 def prepare(level: Level, work: Path, ports: dict) -> Path:
     from pyodex.builder import build_extension
 
-    src = FIXTURES / level.fixture
     dst = work / level.fixture
     if dst.exists():
         shutil.rmtree(dst)
+    if level.name == "L10":
+        _write_compat_fixture(dst)
+        main = dst / "main.py"
+        main.write_text(main.read_text().replace("__URL__", f"http://127.0.0.1:{ports['http']}/json"))
+        return build_extension(dst, work / "dist" / level.slug)
+
+    src = FIXTURES / level.fixture
     shutil.copytree(src, dst)
     toml = dst / "pyodex.toml"
     if toml.exists() and "%BASE%" in toml.read_text():
