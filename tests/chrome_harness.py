@@ -277,7 +277,7 @@ LEVELS = [
           9, ("primary",), experimental=True),
     Level("L10", "l10-compat-chrome", "L10_compat_chrome", "compat probes in Chrome's V8, not just Node", 10,
           ("primary",)),
-    Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots and paints", 11, ("primary",)),
+    Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11, ("primary",)),
 ]
 
 
@@ -718,6 +718,15 @@ def check_l11(level, ctx, env, c: Checks) -> None:
     has_btn = bool(frame.evaluate("() => !!document.getElementById('mp-btn')"))
     c.expect("python painted a widget", has_btn, "no #mp-btn")
 
+    crypto = frame.evaluate("() => document.body.getAttribute('data-crypto') || ''")
+    c.expect("sha256 works on the small tier", "sha=ba7816bf8f01" in (crypto or ""), f"crypto={crypto!r}")
+    c.expect("hmac-sha256 works", "mac=" in (crypto or "") and "mac=err" not in (crypto or ""),
+             f"crypto={crypto!r}")
+    http = frame.evaluate("() => document.body.getAttribute('data-http') || ''")
+    c.expect("synchronous http_get works", '"ok"' in (http or ""), f"http={http!r}")
+    sock = frame.evaluate("() => document.body.getAttribute('data-sock') || ''")
+    c.expect("sockets honestly unsupported on this tier", sock == "unsupported", f"sock={sock!r}")
+
 
 CHECKS = {
     "L1": check_l1,
@@ -808,6 +817,13 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
     dst = work / level.fixture
     if dst.exists():
         shutil.rmtree(dst)
+    if level.name == "L11":
+        src = FIXTURES / level.fixture
+        shutil.copytree(src, dst)
+        main = dst / "main.py"
+        main.write_text(f'HTTP_URL = "http://127.0.0.1:{ports["http"]}/json"\n' + main.read_text())
+        return build_extension(dst, work / "dist" / level.slug)
+
     if level.name == "L10":
         _write_compat_fixture(dst)
         main = dst / "main.py"

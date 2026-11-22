@@ -52,11 +52,24 @@ def _cmd_compat(args: argparse.Namespace) -> int:
 
     if args.action == "list":
         reg = compat.load_registry()
+        if args.runtime == "micropython":
+            from .compat_mp import OUT as MP_REGISTRY
+
+            if not MP_REGISTRY.exists():
+                print("no MicroPython registry yet; run `pyodex compat mp --top 30 --write`")
+                return 1
+            reg = json.loads(MP_REGISTRY.read_text())
         for name, e in sorted(reg.items()):
             if args.filter and e["status"] != args.filter:
                 continue
             print(f"{e['status']:<8} {name:<32} {e.get('version', ''):<12} {e.get('reason', '')}")
         return 0
+    if args.action == "mp":
+        from .compat_mp import main as mp_main
+
+        return mp_main([*args.packages, *(["--top", str(args.top)] if args.top else []),
+                        *(["--write"] if args.shipped else [])])
+
     names = list(args.packages)
     if args.top:
         names += [n for n in compat.top_packages(args.top) if n not in names]
@@ -154,11 +167,12 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=_cmd_zip)
 
     s = sub.add_parser("compat", help="test / list Pyodide package compatibility")
-    s.add_argument("action", choices=["test", "list"])
+    s.add_argument("action", choices=["test", "list", "mp"])
     s.add_argument("packages", nargs="*")
     s.add_argument("--top", type=int, help="also test top-N PyPI packages")
     s.add_argument("--filter", choices=["good", "import-only", "bad"], help="for list")
     s.add_argument("--shipped", action="store_true", help="write results into the shipped registry")
+    s.add_argument("--runtime", choices=["pyodide", "micropython"], default="pyodide")
     s.add_argument("--pyodide-version", default=PYODIDE_VERSION)
     s.set_defaults(fn=_cmd_compat)
 

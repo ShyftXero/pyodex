@@ -242,9 +242,31 @@ cache is runtime-agnostic too: `cache_patterns()` covers MicroPython and RustPyt
 URLs even though we ship neither, so other pages running those runtimes are served
 from our cache when a digest is pinned.
 
-The MicroPython tier today gives you in-page DOM access at ~2 MB — `status()`,
-`button()`, `count()`, `text_of()`, `on()` in `pyodex_mp`. Crypto/socket/requests
-shims for that tier are **not** implemented; those live on the Pyodide tier.
+The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `button()`,
+`count()`, `text_of()`, `on()`, plus small-tier shims in `pyodex_mp`:
+
+| Shim | Status |
+|---|---|
+| `sha256_hex()` / `hmac_sha256_hex()` | works (MicroPython's hashlib has no `hexdigest()`, so it hexlifies the raw digest) |
+| `http_get()` / `http_post_json()` | works, via *synchronous* XHR — it blocks the tab, so it is for occasional small calls, not heavy traffic |
+| `socket()` | **refuses on purpose** with a message pointing at the Pyodide tier, which has real sockets through the proxy |
+
+### Compatibility sweeps, per tier
+
+`Pyodide`: broad sweep in Node, plus twelve packages re-exercised in Chrome's V8
+(L10). `MicroPython`: there is no installer, so compatibility means "vendor the pure
+wheel's modules and see if it imports" — exactly what a developer would do:
+
+```
+uv run pyodex compat mp --top 30 --write     # sweep, write src/pyodex/compat_mp.json
+uv run pyodex compat list --runtime micropython
+```
+
+The first 30 packages: **4 good** (`packaging`, `pygments`, `python-dateutil`,
+`typing-inspection`), 20 bad, 6 untestable (native wheels). The common failures are
+informative: `no module named '__future__'`, `atexit`, `collections.abc`, and
+newer annotation syntax. That is the honest shape of this tier — it is for small,
+in-page logic, not for pulling in the world.
 
 ## Novelty ledger
 

@@ -1,0 +1,212 @@
+{
+ "annotated-types": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'collections.abc'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "anyio": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "attrs": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'typing'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "boto3": {
+  "status": "bad",
+  "reason": "err: ImportError: can't import name NullHandler",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "botocore": {
+  "status": "bad",
+  "reason": "err: ImportError: can't import name NullHandler",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "certifi": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'atexit'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "cffi": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "charset-normalizer": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "click": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "cryptography": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "h11": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'typing'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "idna": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "iniconfig": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'collections.abc'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "markupsafe": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "numpy": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "packaging": {
+  "status": "good",
+  "reason": "",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pluggy": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pycparser": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'subprocess'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pydantic": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named 'importlib'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pydantic-core": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pygments": {
+  "status": "good",
+  "reason": "",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pytest": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "python-dateutil": {
+  "status": "good",
+  "reason": "",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "pyyaml": {
+  "status": "untested",
+  "reason": "no pure-Python wheel",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "requests": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "setuptools": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "six": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "typing-extensions": {
+  "status": "bad",
+  "reason": "err: SyntaxError: invalid syntax",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "typing-inspection": {
+  "status": "good",
+  "reason": "",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ },
+ "urllib3": {
+  "status": "bad",
+  "reason": "err: ImportError: no module named '__future__'",
+  "runtime": "micropython",
+  "source": "test",
+  "micropython": "1.29.0-6"
+ }
+}
