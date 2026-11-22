@@ -501,6 +501,11 @@
     const retry = () => {
       if (attempt < 10) setTimeout(() => attach(attempt + 1), 200 * (attempt + 1));
     };
+    try {
+      chrome.storage.local.set({ __cs: "sending attempt " + attempt }).catch(() => {});
+    } catch (e) {
+      document.documentElement.dataset.csErr = String(e && e.message);
+    }
     chrome.runtime
       .sendMessage({ kind: "pyodex-attach", url: location.href })
       .then((r) => {
