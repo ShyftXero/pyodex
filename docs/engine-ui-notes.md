@@ -160,6 +160,39 @@ To verify for real: load the built extension in a Chrome that accepts
 `--load-extension` (or load it unpacked manually) and inspect
 `chrome://extensions` → the offscreen document.
 
+## The host should be a SharedWorker, not an offscreen document
+
+Probe result (two extension pages connecting to the same `sw.js`):
+
+```
+page1: {"boots":1}     page2: {"boots":2}     # one instance, two connections
+```
+
+So a SharedWorker *is* observable and shared in this harness, while an offscreen
+document is not even executed. That makes the SharedWorker the host we can actually
+verify — and it matches the architecture better anyway:
+
+```
+content script  ──postMessage──▶  per-tab agent iframe (tiny, no interpreter)
+      ▲                                     │ port
+      │                                     ▼
+      └──── DOM ops ────  SharedWorker: ONE Pyodide, per-tab sessions
+```
+
+Per-tab cost is a small iframe; the interpreter exists once for the whole browser.
+The agent exists because a worker cannot talk to content scripts directly — it can
+only answer on its port.
+
+Implementation order when someone picks this up:
+
+1. `engine_worker.js` (classic shared worker; `import()` for pyodide.mjs works in
+   workers): `onconnect` → per-tab ports, boot once, `_engine_attached(tabId)`.
+2. `agent.html`/`agent.js`: connect to the worker, relay ops to the content script
+   (which already executes them) and results back.
+3. Point `ui = "engine"` at this pair; drop `chrome.offscreen` entirely, which also
+   removes the `offscreen` permission.
+4. L9 then becomes testable in the harness — that is the whole reason to prefer it.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
