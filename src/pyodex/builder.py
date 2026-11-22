@@ -264,6 +264,44 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
     return m
 
 
+RUSTPYTHON_UNSUPPORTED = {
+    "js": "RustPython's wasm build has no `js` module, so there is no JS bridge",
+    "pyodex_runtime": "the Pyodide runtime is not available on the RustPython tier",
+    "pyodex_natural": "the Pyodide shim layer is not available on the RustPython tier",
+}
+
+
+def _guard_rustpython_imports(project: Path, cfg: ExtConfig) -> None:
+    """Fail the build, with guidance, when an app imports something this tier lacks.
+
+    Discovering `import js` at runtime as a bare ModuleNotFoundError is technically
+    loud but useless: the message says nothing about the tier or what to use instead.
+    """
+    import ast
+
+    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    for f in files:
+        try:
+            tree = ast.parse(f.read_text())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module.split(".")[0]]
+            for name in names:
+                if name in RUSTPYTHON_UNSUPPORTED:
+                    raise RuntimeError(
+                        f"{f.name} imports `{name}`, which the RustPython tier cannot provide:\n"
+                        f"  {RUSTPYTHON_UNSUPPORTED[name]}.\n"
+                        "Use `pyodex_rp` (status, count, text_of, set_attr) for DOM access, "
+                        "or choose runtime = \"pyodide\" for the full Python surface "
+                        "(Page, Overlay, chrome.*, sockets)."
+                    )
+
+
 def _plan_runtime(cfg: ExtConfig, requirements: list[str], project: Path) -> TierPlan:
     """Pick the cheapest tier that can run this app, or refuse clearly."""
     needs = requirements_for(
@@ -449,6 +487,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
         print(f"built {runtime} tier ({cfg.slug})")
 
+    if cfg.runtime == "rustpython":
+        _guard_rustpython_imports(project, cfg)
     if cfg.runtime == "rustpython":
         # RustPython's glue calls eval, and MV3 extension pages cannot allow
         # unsafe-eval. A manifest sandbox page can — at the cost of an opaque

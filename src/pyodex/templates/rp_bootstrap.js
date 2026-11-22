@@ -79,7 +79,20 @@ async function boot() {
   // One compilation unit: RustPython's pyEval has no module loader for us, so the
   // shim is concatenated ahead of the app.
   const source = (await text("pyodex_rp.py")) + "\n" + (await text("app/main.py"));
-  rp.pyEval(source, { vars, stdout: (line) => console.log("[rp]", line) });
+  try {
+    rp.pyEval(source, { vars, stdout: (line) => console.log("[rp]", line) });
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    const missing = /No module named '([^']+)'/.exec(msg);
+    if (missing) {
+      throw new Error(
+        `RustPython tier: module '${missing[1]}' does not exist here. ` +
+          "This tier has no `js` module and no `pyodex_runtime`; use the `pyodex_rp` " +
+          "helpers (status, count, text_of, set_attr) or switch to runtime = \"pyodide\"."
+      );
+    }
+    throw e;
+  }
   status?.classList.add("hidden");
 }
 

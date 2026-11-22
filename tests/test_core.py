@@ -485,3 +485,27 @@ def test_dev_flag_controls_the_traceback_panel(tmp_path):
     assert "const DEV = false;" in (built / "bootstrap.js").read_text()
     built2, _ = _build(tmp_path, '[extension]\nname = "Dev"\nhttp = false\n')
     assert "const DEV = true;" in (built2 / "bootstrap.js").read_text()
+
+
+def test_rustpython_guard_fails_loudly_on_js_import(tmp_path):
+    """Choosing RustPython and importing `js` must fail at build time with guidance."""
+    import pytest
+
+    from pyodex.builder import build_extension
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "RP"\nruntime = "rustpython"\nhttp = false\n')
+    (tmp_path / "main.py").write_text("import js\njs.document.title = 'x'\n")
+    with pytest.raises(RuntimeError) as err:
+        build_extension(tmp_path, tmp_path / "out")
+    msg = str(err.value)
+    assert "no `js` module" in msg
+    assert "pyodex_rp" in msg and "pyodide" in msg
+
+
+def test_rustpython_guard_allows_the_shim(tmp_path):
+    from pyodex.builder import build_extension
+
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "RP2"\nruntime = "rustpython"\nhttp = false\n')
+    (tmp_path / "main.py").write_text("import pyodex_rp as ui\nui.status('ok')\n")
+    built = build_extension(tmp_path, tmp_path / "out")
+    assert (built / "rustpython" / "rustpython_wasm.js").exists()
