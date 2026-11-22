@@ -1,6 +1,0 @@
-[extension]
-name = "L13 Brython"
-matches = ["<all_urls>"]
-http = false
-boot = "auto"
-runtime = "brython"

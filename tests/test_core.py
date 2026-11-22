@@ -446,8 +446,8 @@ def test_local_engine_is_default(tmp_path):
 def test_runtime_tiers_ranked_and_modular():
     from pyodex.runtimes import DEFAULT_ORDER, RUNTIMES, cache_patterns, choose, requirements_for
 
-    assert DEFAULT_ORDER == ("micropython", "brython", "rustpython", "pyodide")
-    assert set(RUNTIMES) >= {"micropython", "brython", "rustpython", "pyodide"}
+    assert DEFAULT_ORDER == ("micropython", "rustpython", "pyodide")
+    assert set(RUNTIMES) >= {"micropython", "rustpython", "pyodide"}
     # a dependency-using app cannot land on a package-less tier
     needs = requirements_for(dependencies=["numpy"], packages=[], sockets=False, crypto=False, full_stdlib=False)
     assert choose(needs).name == "pyodide"

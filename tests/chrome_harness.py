@@ -295,8 +295,6 @@ LEVELS = [
           ("primary",)),
     Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11,
           ("primary", "echo")),
-    Level("L13", "l13-brython", "L13_brython", "Brython tier boots and paints (third tier)",
-          13, ("primary",), experimental=True),
     Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier in a sandbox page", 12, ("primary",)),
 ]
 
@@ -783,21 +781,6 @@ def check_l12(level, ctx, env, c: Checks) -> None:
              bool(marker and marker.startswith("inputs=")), f"marker={marker!r}")
 
 
-def check_l13(level, ctx, env, c: Checks) -> None:
-    """The Brython tier: Python in the page, no wasm, ~2 MB."""
-    page = ctx.new_page()
-    page.goto(f"{env['base']}/login.html")
-    frame = overlay_frame(page, 60000)
-    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
-        return
-    caps = wait_for(lambda: frame.evaluate("() => window.pyodexCaps || null"), 60)
-    c.expect("runtime is brython", bool(caps and caps.get("runtime") == "brython"), f"caps={caps!r}")
-    marker = wait_for(lambda: frame.evaluate("() => document.body.getAttribute('data-br') || null"), 60)
-    c.expect("python read the overlay DOM", bool(marker and marker.startswith("inputs=")), f"marker={marker!r}")
-    c.expect("python painted a widget",
-             bool(frame.evaluate("() => !!document.getElementById('br-btn')")), "no #br-btn")
-
-
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -813,7 +796,6 @@ CHECKS = {
     "L10": check_l10,
     "L11": check_l11,
     "L12": check_l12,
-    "L13": check_l13,
 }
 
 
