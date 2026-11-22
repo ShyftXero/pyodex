@@ -88,6 +88,25 @@ extension where a content script sends one message and the worker writes a stora
 marker, with no pyodex in the way. If that works, bisect the difference (module vs
 classic worker, listener count, eager `ensureEngine()` at module top).
 
+## Bisect result (three-file repro, pyodex's worker shape)
+
+Reproducing the worker's construction outside pyodex (module worker importing a
+helper, eager `chrome.offscreen.createDocument` at module top, two `onMessage`
+listeners, an `askEngine` helper): the content script's attach **does arrive**
+(`seenA: attach-arrived`) and the failure moves to the engine hop, which rejects
+with `Could not establish connection. Receiving end does not exist.`
+
+So the earlier "the handler never ran" reading was wrong — my storage marker was
+written but the response path failed, and I was reading the marker from a race.
+The real defect is the worker→engine request in the *pyodex* build, and the repro
+already shows one likely cause worth checking first: the engine document's listener
+must be an *external* module (`engine.js`), because an inline `<script type="module">`
+is blocked by the extension CSP — which is exactly how the repro failed.
+
+Next: verify in the pyodex build that `engine.js` is actually loaded and registering
+(console of the offscreen document, or a storage marker written from engine.js at
+module scope), then re-run L9.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
