@@ -915,6 +915,42 @@ class _ChromeAction:
         api.setTitle(jsobj({"title": text}))
 
 
+_BROWSER_EVENTS: dict[str, list[Callable]] = {}
+_EVENT_BRIDGE_READY = False
+
+
+def _dispatch_browser_event(payload: Any) -> None:
+    try:
+        data = payload.to_py() if hasattr(payload, "to_py") else payload
+        name = data.get("event")
+        args = data.get("payload") or []
+    except Exception:  # noqa: BLE001
+        return
+    for fn in _BROWSER_EVENTS.get(str(name), []):
+        _invoke(fn, args)
+
+
+def _install_event_bridge() -> None:
+    """Listen once for events the worker forwards, and fan them out in Python."""
+    # A list sentinel here was falsy (`[]`), so the bridge installed once per
+    # subscription and every event was dispatched twice.
+    global _EVENT_BRIDGE_READY
+    if _EVENT_BRIDGE_READY:
+        return
+    try:
+        api = js.chrome.runtime.onMessage
+    except AttributeError:
+        return
+
+    def on_message(msg, _sender, _send) -> bool:
+        if getattr(msg, "kind", None) == "pyodex-event":
+            _dispatch_browser_event(msg)
+        return False
+
+    api.addListener(js_callback(on_message))
+    _EVENT_BRIDGE_READY = True
+
+
 class _ChromeRuntime:
     def url(self, path: str) -> str:
         return runtime_url(path)
@@ -948,6 +984,25 @@ class Chrome:
     action = _ChromeAction()
     runtime = _ChromeRuntime()
     windows = _ChromeWindows()
+
+    def on(self, event: str, fn: Callable | None = None) -> Callable:
+        """Subscribe to a browser event from Python.
+
+            @chrome.on("storage.onChanged")
+            def changed(args): ...
+
+        The event name must also be declared statically (`chrome.on("ns.event", fn)`
+        at import time) so the worker can register the listener at top level — MV3
+        will not wake a worker for listeners added later.
+        """
+        if fn is None:  # decorator form: @chrome.on("storage.onChanged")
+            def deco(handler: Callable) -> Callable:
+                return self.on(event, handler)
+
+            return deco
+        _install_event_bridge()
+        _BROWSER_EVENTS.setdefault(event, []).append(fn)
+        return fn
 
     @property
     def raw(self) -> Any:

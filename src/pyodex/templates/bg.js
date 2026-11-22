@@ -105,6 +105,28 @@ function askEngine(msg, timeoutMs = 20000) {
   });
 }
 
+// ---- browser events ------------------------------------------------------- //
+// MV3 only wakes the worker for listeners registered at top level, so the event
+// list is fixed at build time (extracted from `chrome.on("ns.event", fn)`).
+const PYODEX_EVENTS = {{EVENTS}};
+
+for (const name of PYODEX_EVENTS) {
+  const [namespace, eventName] = String(name).split(".");
+  const target = chrome[namespace];
+  if (!target || !target[eventName] || !target[eventName].addListener) continue;
+  target[eventName].addListener((...args) => {
+    let payload;
+    try {
+      payload = JSON.parse(JSON.stringify(args));
+    } catch {
+      payload = null; // non-serialisable args are dropped rather than thrown
+    }
+    chrome.runtime
+      .sendMessage({ kind: "pyodex-event", event: name, payload })
+      .catch(() => {}); // no Python host awake: nothing to deliver to
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.kind === "pyodex-attach") {
     const tabId = sender.tab?.id ?? null;

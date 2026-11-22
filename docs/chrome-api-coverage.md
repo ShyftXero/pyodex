@@ -41,7 +41,7 @@ by how often an extension actually needs them.
 
 | Capability | JS API | Why it matters |
 |---|---|---|
-| **React to browser events** | `tabs.onUpdated`, `tabs.onRemoved`, `runtime.onMessage`, `webNavigation.onCommitted`, `storage.onChanged`, `action.onClicked`, `alarms.onAlarm`, `contextMenus.onClicked` | **the biggest gap.** We can *call* the platform; we cannot *listen* to it from Python. Today a pyodex app learns about a page by matching a URL (`@urlmatch`), not by an event stream |
+| ~~**React to browser events**~~ | `chrome.on("ns.event", fn)` | **closed** — see below |
 | **Background work without a tab** | MV3 service worker | Pyodide cannot run in an MV3 service worker (no DOM / eval restrictions). Our shared engine needs at least one tab open; work that must run with zero tabs is impossible today |
 | **Inject script into pages** | `scripting.executeScript`, `registerContentScripts` | our DOM ops go through the content script; arbitrary JS execution in the page is not offered (deliberately — it is the remote-code boundary) |
 | **Network control** | `declarativeNetRequest` (block, redirect, modify headers) | powerful and very commonly used; unwrapped. Rules are JSON, so this is mostly a Python-to-JSON API |
@@ -66,12 +66,31 @@ by how often an extension actually needs them.
 - **Anything exotic** — `chrome.raw` reaches the underlying API object directly, so a
   missing wrapper is an ergonomics problem, not a wall.
 
-## The order I would close them
+## The event bridge (closed)
 
-1. **Event bridge** (`chrome.on("tabs.onUpdated", fn)`): unlocks context menus,
-   alarms, notifications, storage change listeners in one move, because they all need
-   the same "register a Python callback that survives until the interpreter unloads"
-   machinery.
+```python
+@chrome.on("tabs.onUpdated")
+def updated(args): ...          # args = the event arguments, JSON-shaped
+```
+
+How it works, because the constraint is not obvious:
+
+1. The build scans for `chrome.on("ns.event", ...)` and writes the list into the
+   service worker (`bg.js` as `PYODEX_EVENTS`).
+2. The worker registers those listeners **at top level**, because MV3 only wakes a
+   worker for statically registered listeners.
+3. On fire, the worker forwards `{kind:"pyodex-event", event, payload}`; the Python
+   host dispatches to the registered functions.
+
+Verified by harness L20 (demo 07): a real `chrome.storage` write reaches a Python
+handler, twice, and updates the UI.
+
+**What it unlocks next:** `alarms`, `contextMenus`, `notifications`, `webNavigation`,
+`action.onClicked` and `storage.onChanged` all become wrappers over the same machinery
+rather than new plumbing — the missing piece is only the *setter* side
+(`contextMenus.create`, `alarms.create`, `notifications.create`).
+
+## The order I would close the rest
 2. **`declarativeNetRequest`** — it is JSON in and JSON out; a Python builder for the
    rules is a small, high-value wrapper.
 3. **Background without tabs** — needs either a native-messaging host or an

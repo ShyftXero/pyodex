@@ -337,6 +337,8 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L20", "demo-07-event-bridge", "", "demo 07: browser events reach Python", 20, ("primary",),
+          demo="07-event-bridge"),
     Level("L19", "demo-06-api-tour", "", "demo 06: chrome.* and DOM breadth", 19, ("primary",),
           demo="06-api-tour"),
     Level("L18", "demo-05-tab-watcher", "", "demo 05: always-on watcher, shared interpreter", 18, ("primary",),
@@ -1010,6 +1012,28 @@ def check_l19(level, ctx, env, c: Checks) -> None:
         c.expect(label, needle in (text or ""), f"missing {needle!r} in {(text or '')[:260]!r}")
 
 
+def check_l20(level, ctx, env, c: Checks) -> None:
+    """Demo 07: a chrome event (storage.onChanged) is delivered into Python."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    c.expect("waits for events", bool(wait_for(lambda: "waiting for events" in frame_text(frame), 60)),
+             f"text={frame_text(frame)[:120]!r}")
+
+    frame.click("#fire-btn")
+    got = wait_for(lambda: "storage.onChanged" in frame_text(frame) and frame_text(frame), 45)
+    c.expect("event delivered to Python", bool(got), f"text={frame_text(frame)[:200]!r}")
+    c.expect("handler ran and updated the UI", "1 event(s)" in (got or ""), f"text={(got or '')[:200]!r}")
+
+    frame.click("#fire-btn")
+    c.expect("second event counted",
+             bool(wait_for(lambda: "2 event(s)" in frame_text(frame), 45)),
+             f"text={frame_text(frame)[:200]!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1032,6 +1056,7 @@ CHECKS = {
     "L17": check_l17,
     "L18": check_l18,
     "L19": check_l19,
+    "L20": check_l20,
 }
 
 

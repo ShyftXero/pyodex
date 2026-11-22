@@ -28,6 +28,78 @@ from .packages import (Pin, abi_from_lock, ensure_in_store, link_cow, lock, pyod
                        record_digests, script_dependencies, uv_platform, verify_against_lock)
 from .runtimes import TierPlan, cache_patterns, choose, requirements_for
 
+
+def _uses_dom(project: Path, cfg: ExtConfig) -> bool:
+    """Does the app touch the page or draw UI? Decides whether it needs a page host."""
+    import ast
+
+    DOM_NAMES = {"Overlay", "Page", "page", "ui", "document", "pyodex_mp"}
+    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    for f in files:
+        try:
+            tree = ast.parse(f.read_text())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in DOM_NAMES:
+                return True
+            if isinstance(node, ast.Attribute) and node.attr in {"query", "set_value", "set_text", "button", "card"}:
+                return True
+    return False
+
+
+def _boot_plan(project: Path, cfg: ExtConfig) -> None:
+    """Say what this app actually needs, instead of making the developer guess.
+
+    An event-only app (chrome.* and listeners, no DOM) wants one interpreter and no
+    per-tab injection. A DOM app needs a page host. Saying so at build time is
+    cheaper than discovering it from a memory profile.
+    """
+    events = _declared_events(project, cfg)
+    dom = _uses_dom(project, cfg)
+    if not dom and events:
+        hint = "event-only app: one interpreter is enough"
+        if cfg.boot in ("auto", "trigger", "visible"):
+            hint += (f" — boot = {cfg.boot!r} pays a per-tab interpreter for nothing; "
+                     'consider boot = "user" or engine = "shared"')
+        print(f"plan: {hint} ({len(events)} event(s): {', '.join(events)})")
+    elif not dom:
+        print("plan: no DOM and no events declared — this app may not need a page at all")
+    elif events:
+        print(f"plan: DOM + {len(events)} event(s) ({', '.join(events)})")
+    else:
+        print("plan: DOM only (no browser events declared)")
+
+
+def _declared_events(project: Path, cfg: ExtConfig) -> list[str]:
+    """Find `chrome.on("ns.event", fn)` calls so the worker can register them.
+
+    MV3 only delivers events to listeners registered at top level, so this has to
+    happen at build time rather than when Python asks.
+    """
+    import ast
+
+    found: list[str] = []
+    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    for f in files:
+        try:
+            tree = ast.parse(f.read_text())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not (isinstance(fn, ast.Attribute) and fn.attr == "on"):
+                continue
+            if not (isinstance(fn.value, ast.Name) and fn.value.id == "chrome"):
+                continue
+            if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                name = node.args[0].value
+                if name not in found:
+                    found.append(name)
+    return found
+
 TEMPLATES = Path(__file__).parent / "templates"
 RUNTIME = Path(__file__).parent / "runtime"
 
@@ -538,6 +610,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     lock_path = project / f"{cfg.slug}.pyodex.lock" if cfg.entry != "main.py" else project / "pyodex.lock"
     platform = uv_platform(abi_from_lock(pyodide_lock))
     pins = lock(lock_path, reqs, py_ver, constraints=pyodide_constraints(pyodide_lock), platform=platform)
+    _boot_plan(project, cfg)
     plan = _plan_runtime(cfg, reqs, project)
     print(f"runtime: {plan.describe()}")
     (out / "runtime-plan.json").write_text(json.dumps({
@@ -606,6 +679,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
             "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
             "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
+            "EVENTS": json.dumps(_declared_events(project, cfg)),
         }))
     if cfg.ui == "engine":
         # SharedWorker host: one interpreter for the browser, one tiny agent iframe
