@@ -26,6 +26,7 @@ from . import PYODIDE_VERSION
 from .deps import HTTP_SHIM_PACKAGES, PYODIDE_CORE_FILES, ensure_pyodide, ensure_url_asset
 from .packages import (Pin, abi_from_lock, ensure_in_store, link_cow, lock, pyodide_constraints,
                        record_digests, script_dependencies, uv_platform, verify_against_lock)
+from .runtimes import TierPlan, cache_patterns, choose, requirements_for
 
 TEMPLATES = Path(__file__).parent / "templates"
 RUNTIME = Path(__file__).parent / "runtime"
@@ -52,6 +53,12 @@ class ExtConfig:
     overlay_body: str = ""  # inline alternative to overlay.body.html
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
     cache: bool = True  # digest-verified blob cache + per-site opt-out options page
+    # Ordered, cheapest first. The build picks the first tier that satisfies what
+    # the app declared; `runtime` forces one.
+    runtimes: list[str] | None = None
+    runtime: str = ""
+    # Extra blob URLs we can verify and therefore cache for other pages too.
+    runtime_pins: dict[str, str] = field(default_factory=dict)
     # Serve *other pages'* Pyodide CDN requests from this extension's cache.
     # Restricted to these hosts, and disabled per site by the opt-out list.
     page_cache: bool = True
@@ -126,6 +133,9 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         overlay_body=ext.get("overlay_body", ""),
         natural=ext.get("natural", True),
         cache=ext.get("cache", True),
+        runtimes=ext.get("runtimes"),
+        runtime=ext.get("runtime", ""),
+        runtime_pins=data.get("runtime_pins", {}),
         page_cache=ext.get("page_cache", True),
         page_cache_hosts=ext.get("page_cache_hosts", ["cdn.jsdelivr.net"]),
         runtime_base=ext.get("runtime_base", "bundled"),
@@ -250,6 +260,71 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
     return m
 
 
+def _plan_runtime(cfg: ExtConfig, requirements: list[str], project: Path) -> TierPlan:
+    """Pick the cheapest tier that can run this app, or refuse clearly."""
+    needs = requirements_for(
+        dependencies=requirements,
+        packages=cfg.pyodide_packages,
+        sockets=_imports_any(project, cfg, ("socket", "ssl")),
+        crypto=_imports_any(project, cfg, ("hashlib", "hmac", "cryptography")),
+        full_stdlib=bool(cfg.pyodide_packages),
+    )
+    names = [cfg.runtime] if cfg.runtime else cfg.runtimes
+    from .runtimes import RUNTIMES
+
+    considered = list(cfg.runtimes or ["micropython", "rustpython", "pyodide"])
+
+    if cfg.runtime:
+        forced = RUNTIMES.get(cfg.runtime)
+        if forced is None:
+            raise ValueError(f"unknown runtime {cfg.runtime!r}; known: {sorted(RUNTIMES)}")
+        if not forced.implemented:
+            raise RuntimeError(
+                f"runtime {forced.name!r} is declared but not implemented yet ({forced.notes}). "
+                f"Implemented: {[n for n, r in RUNTIMES.items() if r.implemented]}. "
+                "Unset `runtime` to let the build pick the cheapest working tier."
+            )
+        if not needs <= forced.capabilities:
+            raise RuntimeError(
+                f"runtime {forced.name!r} cannot satisfy {sorted(needs - forced.capabilities)}"
+            )
+        return TierPlan(runtime=forced, needs=needs, considered=considered)
+
+    # Default: warn about tiers we cannot run yet, and build with the cheapest
+    # implemented one that fits. A declared-but-missing tier must not break a
+    # project that never asked for it.
+    if cfg.runtimes is None:
+        # No explicit list: only a tier whose Python API we ship is safe to pick.
+        considered = ["pyodide"]
+    usable = [n for n in considered if RUNTIMES.get(n) and RUNTIMES[n].implemented]
+    skipped = [n for n in considered if n not in usable]
+    if skipped:
+        print(f"runtime: skipping not-yet-implemented tier(s) {skipped}")
+    if not usable:
+        raise RuntimeError(f"none of {considered} is implemented yet")
+    return TierPlan(runtime=choose(needs, usable), needs=needs, considered=considered)
+
+
+def _imports_any(project: Path, cfg: ExtConfig, modules: tuple[str, ...]) -> bool:
+    """Cheap AST scan for imports that force a capability."""
+    import ast
+
+    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    for f in files:
+        try:
+            tree = ast.parse(f.read_text())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(a.name.split(".")[0] in modules for a in node.names):
+                    return True
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0] in modules:
+                    return True
+    return False
+
+
 def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = False) -> Path:
     project, cfg = resolve_project(target)
     out = out or (project / "dist" / cfg.slug)
@@ -257,10 +332,74 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         shutil.rmtree(out)
     out.mkdir(parents=True)
 
+    # Stamp the datever before anything can return early: an empty "version" makes
+    # the manifest invalid and Chrome refuses to load the extension silently.
+    if not cfg.version:
+        from .version import chrome_version, datever as _datever
+
+        cfg.version = chrome_version(_datever())
+
     resources: list[str] = ["overlay.html", "bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
                             "pyodide/*", "app/*", "wheels/*"]
 
-    # 1. Pyodide core
+    plan_mp = None  # set when the micropython tier is chosen
+    def _mp_build() -> None:
+        """MicroPython tier: vendored wasm, its own bootstrap, tiny shim."""
+        from .deps import ensure_micropython
+
+        mp_src = ensure_micropython()
+        mp_dst = out / "micropython"
+        mp_dst.mkdir()
+        for name in ("micropython.mjs", "micropython.wasm"):
+            shutil.copy2(mp_src / name, mp_dst / name)
+        (out / "pyodex_mp.py").write_text((RUNTIME / "pyodex_mp.py").read_text())
+        (out / "bootstrap.js").write_text(
+            _render((TEMPLATES / "mp_bootstrap.js").read_text(), {"NAME": cfg.name}))
+        app = out / "app"
+        app.mkdir()
+        _copy(project / cfg.entry, app / "main.py")
+        (app / "files.json").write_text(json.dumps(["main.py"]))
+        body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
+                                    if (project / "overlay.body.html").exists() else "")
+        css = cfg.overlay_css or ((project / "overlay.css").read_text()
+                                  if (project / "overlay.css").exists() else "")
+        (out / "overlay.html").write_text(_render((TEMPLATES / "overlay.html").read_text(), {
+            "NAME": cfg.name, "BODY": body, "CSS": css, "SCRIPTS": "",
+        }))
+        shutil.copy2(TEMPLATES / "injector.js", out / "injector.js") if False else None
+        (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
+            "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
+            "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
+            "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
+            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
+        }))
+        resources = ["overlay.html", "bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
+        # The cache surface is runtime-agnostic; the manifest references these, so
+        # a tier that omits them makes Chrome reject the whole extension.
+        if cfg.cache:
+            for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
+                (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+            resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+        if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
+            (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
+                "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
+                "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
+            }))
+            resources.append("bg.js")
+            (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
+            (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
+                                                     {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
+            resources += ["pagebridge.js", "pagemain.js"]
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
+        print(f"built micropython tier ({cfg.slug})")
+
+    if cfg.runtime == "micropython":
+        _plan_runtime(cfg, [], project)  # validates capabilities, raises if forced wrongly
+        _mp_build()
+        return out
+
+    # 1. Runtime core
     pyo_src = ensure_pyodide(cfg.pyodide_version)
     pyo_dst = out / "pyodide"
     pyo_dst.mkdir()
@@ -284,6 +423,16 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     lock_path = project / f"{cfg.slug}.pyodex.lock" if cfg.entry != "main.py" else project / "pyodex.lock"
     platform = uv_platform(abi_from_lock(pyodide_lock))
     pins = lock(lock_path, reqs, py_ver, constraints=pyodide_constraints(pyodide_lock), platform=platform)
+    plan = _plan_runtime(cfg, reqs, project)
+    print(f"runtime: {plan.describe()}")
+    (out / "runtime-plan.json").write_text(json.dumps({
+        "runtime": plan.runtime.name,
+        "needs": sorted(plan.needs),
+        "considered": plan.considered,
+        "approx_mb": plan.runtime.approx_mb,
+        "implemented": plan.runtime.implemented,
+    }, indent=2) + "\n")
+
     from .compat import check_pins
 
     check_pins(pins, allow_bad=allow_bad)
@@ -337,7 +486,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
     if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
             or cfg.engine == "shared" or cfg.ui == "engine"):
-        shutil.copy2(TEMPLATES / "bg.js", out / "bg.js")
+        # Rendered, not copied: the worker carries the runtime blob patterns and
+        # any build-pinned digests (so caching covers tiers we do not bundle).
+        (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
+            "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
+            "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
+        }))
     if cfg.engine == "shared" or cfg.ui == "engine":
         for name in ("engine.html", "engine.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
@@ -366,6 +520,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
         "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
         "TRIGGERS": json.dumps(cfg.triggers),
+        "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
+        "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
     }
     for t in ("overlay.html", "bootstrap.js", "injector.js"):
         (out / t).write_text(_render((TEMPLATES / t).read_text(), ctx))

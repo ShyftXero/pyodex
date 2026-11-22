@@ -1,0 +1,6 @@
+[extension]
+name = "L11 MicroPython"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+runtime = "micropython"

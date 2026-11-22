@@ -85,6 +85,26 @@ HTTP_SHIM_PACKAGES = (
     "certifi",
 )
 
+MICROPYTHON_NPM = "https://cdn.jsdelivr.net/npm/@micropython/micropython-webassembly-pyscript@1.29.0-6"
+MICROPYTHON_FILES = ("micropython.mjs", "micropython.wasm")
+
+
+def ensure_micropython(force: bool = False) -> Path:
+    """Fetch the prebuilt MicroPython wasm distribution into the cache."""
+    target = cache_dir() / "micropython-1.29.0-6"
+    marker = target / ".complete"
+    if marker.exists() and not force:
+        return target
+    target.mkdir(parents=True, exist_ok=True)
+    for name in MICROPYTHON_FILES:
+        dest = target / name
+        if not dest.exists() or force:
+            print(f"downloading {MICROPYTHON_NPM}/{name}")
+            _download(f"{MICROPYTHON_NPM}/{name}", dest)
+    marker.write_text(MICROPYTHON_NPM)
+    return target
+
+
 def ensure_url_asset(url: str, filename: str, force: bool = False) -> Path:
     """Download an arbitrary URL (e.g. a UMD bundle) into the cache, keyed by URL hash."""
     key = hashlib.sha256(url.encode()).hexdigest()[:16]

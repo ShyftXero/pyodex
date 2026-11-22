@@ -9,6 +9,20 @@
 import { cachedFetch, clearAll, noCacheHosts, setNoCacheHosts, stats } from "./cache.js";
 
 const PYODIDE_URL = /\/pyodide\/v?(\d+\.\d+\.\d+)\/full\/([^/?#]+)$/;
+// Any runtime we know how to verify: Pyodide (lockfile) plus whatever the build
+// pinned. Caching is for other pages too, so this covers MicroPython/RustPython
+// blobs when their digests are pinned.
+const RUNTIME_PATTERNS = {{RUNTIME_PATTERNS}};
+const RUNTIME_PINS = {{RUNTIME_PINS}};
+
+function isRuntimeBlob(url) {
+  try {
+    const path = new URL(url).pathname;
+    return RUNTIME_PATTERNS.some((p) => new RegExp(p, "i").test(path));
+  } catch {
+    return false;
+  }
+}
 
 async function expectedDigest(url) {
   const m = PYODIDE_URL.exec(url);
@@ -26,7 +40,16 @@ async function expectedDigest(url) {
 }
 
 async function handleBlob(url, explicitDigest = null) {
-  const digest = explicitDigest || (await expectedDigest(url));
+  // Verification order: caller-supplied (our own bootstrap, digest pinned at
+  // build time), build-pinned URL, then the version lockfile. Anything we cannot
+  // verify passes through to the network rather than being served blind.
+  let digest = explicitDigest;
+  if (!digest) {
+    if (!isRuntimeBlob(url) && !PYODIDE_URL.test(url)) {
+      return { handled: false, reason: "not a runtime blob" };
+    }
+    digest = RUNTIME_PINS[url] || (PYODIDE_URL.test(url) ? await expectedDigest(url) : null);
+  }
   if (!digest) return { handled: false, reason: "unverified" };
   const { data, source } = await cachedFetch(url, digest);
   return { handled: true, source, bytes: new Uint8Array(data), digest };

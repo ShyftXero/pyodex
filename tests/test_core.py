@@ -441,3 +441,39 @@ def test_local_engine_is_default(tmp_path):
     manifest = json.loads((built / "manifest.json").read_text())
     assert "offscreen" not in manifest.get("permissions", [])
     assert not (built / "engine.js").exists()
+
+
+def test_runtime_tiers_ranked_and_modular():
+    from pyodex.runtimes import DEFAULT_ORDER, RUNTIMES, cache_patterns, choose, requirements_for
+
+    assert DEFAULT_ORDER == ("micropython", "rustpython", "pyodide")
+    assert set(RUNTIMES) >= {"micropython", "rustpython", "pyodide"}
+    # a dependency-using app cannot land on a package-less tier
+    needs = requirements_for(dependencies=["numpy"], packages=[], sockets=False, crypto=False, full_stdlib=False)
+    assert choose(needs).name == "pyodide"
+    # a tiny DOM-only app picks the cheapest implemented tier
+    small = requirements_for(dependencies=[], packages=[], sockets=False, crypto=False, full_stdlib=False)
+    assert choose(small, ["micropython", "pyodide"]).name == "micropython"
+    # cache patterns cover tiers we do not ship, so other pages benefit too
+    pats = cache_patterns()
+    assert any("micropython" in p for p in pats) and any("rustpython" in p for p in pats)
+    assert any("pyodide" in p for p in pats)
+
+
+def test_micropython_tier_builds(tmp_path):
+    """The MicroPython tier ships wasm + its own bootstrap, and no Pyodide."""
+    built, _ = _build(tmp_path, '[extension]\nname = "MP"\nruntime = "micropython"\nhttp = false\n',
+                      entry='import pyodex_mp\npyodex_mp.status("hi")\n')
+    manifest = json.loads((built / "manifest.json").read_text())
+    assert manifest["version"], "empty version makes Chrome reject the extension"
+    assert (built / "micropython" / "micropython.wasm").exists()
+    assert (built / "pyodex_mp.py").exists()
+    assert not (built / "pyodide").exists()
+    assert "loadMicroPython" in (built / "bootstrap.js").read_text()
+
+
+def test_default_selection_stays_on_pyodide(tmp_path):
+    """No explicit tier list: do not silently switch runtime under an app."""
+    built, _ = _build(tmp_path, '[extension]\nname = "Plain"\nhttp = false\n')
+    plan = json.loads((built / "runtime-plan.json").read_text())
+    assert plan["runtime"] == "pyodide"

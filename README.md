@@ -207,6 +207,45 @@ On build, `pyodex`:
 Packages Pyodide ships itself (numpy, pandas, cryptography, ...) are pinned to
 Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 
+## Runtime tiers
+
+A pyodex app does not have to run on Pyodide. Tiers are ordered cheapest first and
+each one is a **capability** claim, not just a size, so selection is mechanical:
+
+| Tier | ~Size | Capabilities | Status |
+|---|---|---|---|
+| `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
+| `rustpython` | 5 MB | DOM, wider stdlib than MicroPython, no CPython fidelity | declared, not implemented |
+| `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
+
+```toml
+[extension]
+runtime = "micropython"                        # force a tier
+runtimes = ["micropython", "pyodide"]          # or rank the ones you will accept
+```
+
+The build prints its reasoning and writes `runtime-plan.json`:
+
+```
+runtime: runtime=pyodide (55 MB, needs ['dom', 'packages']; skipped ['micropython', 'rustpython'] (missing capabilities))
+```
+
+Defaults are deliberately conservative: with **no** `runtimes` list the build stays
+on Pyodide, because `pyodex_runtime` is written against it and silently switching a
+project's interpreter would be a trap. Ask for a tier explicitly and you get it;
+ask for one that cannot satisfy your declared needs and the build refuses, naming
+what is missing.
+
+Adding a tier is one entry in `runtimes.py` (size, capabilities, CDN patterns,
+loader) plus a bootstrap; nothing else in the build knows tier names. The blob
+cache is runtime-agnostic too: `cache_patterns()` covers MicroPython and RustPython
+URLs even though we ship neither, so other pages running those runtimes are served
+from our cache when a digest is pinned.
+
+The MicroPython tier today gives you in-page DOM access at ~2 MB — `status()`,
+`button()`, `count()`, `text_of()`, `on()` in `pyodex_mp`. Crypto/socket/requests
+shims for that tier are **not** implemented; those live on the Pyodide tier.
+
 ## Novelty ledger
 
 What here is new, and what is the platform used well. This is a claim register, not
@@ -543,6 +582,8 @@ Six extensions, each built from a fixture and loaded into a real browser:
 | L6 page cache | other pages' Pyodide CDN fetches served from the extension's cache |
 | L7 remote runtime | loader-only package; wasm + stdlib streamed once, then cached |
 | L8 shared engine | one interpreter serving two tabs (same boot id) |
+| L10 compat | the same probes, run in Chrome's V8 |
+| L11 micropython | the 2 MB tier boots, reads the overlay DOM, paints a widget |
 
 ```
 uv run tests/chrome_harness.py                # all levels, parallel
