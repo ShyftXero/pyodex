@@ -107,6 +107,26 @@ Next: verify in the pyodex build that `engine.js` is actually loaded and registe
 (console of the offscreen document, or a storage marker written from engine.js at
 module scope), then re-run L9.
 
+## Marker result: the engine document loads, its script does not run
+
+With a storage marker as the *first* statement of `engine.js`:
+
+```
+offscreen document exists: True
+__eng marker:              {}      <- never written
+```
+
+So `chrome.offscreen.createDocument` succeeds and the document is there, but
+`engine.js` never executes a single line — which also explains the earlier
+"Receiving end does not exist": no listener was ever registered. `engine.html`
+references an external module correctly and `engine.js` parses, so the failure is
+at the document/script level, not our message logic.
+
+This is the point where Playwright stops helping: the offscreen document has its
+own DevTools target and we cannot read its console from the harness. Next step is
+manual — `chrome://extensions` → inspect the offscreen document → read the error —
+then fix whatever it reports.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
