@@ -106,6 +106,24 @@ def ensure_micropython(force: bool = False) -> Path:
     return target
 
 
+def stub_new_function(glue: Path) -> int:
+    """Replace wasm-bindgen's `new Function` with a throwing stub.
+
+    Only valid when the runtime is NOT hosted in a sandbox page: sandboxed pages may
+    use eval, where the real constructor is what makes Python->JS calls work at all.
+    Applying it unconditionally is what broke the sandbox tier.
+    """
+    src = glue.read_text()
+    patched, n = re.subn(
+        r"return addHeapObject\(new Function\(varg0\)\);",
+        'throw new Error("new Function is unavailable under extension CSP");',
+        src,
+    )
+    if n:
+        glue.write_text(patched)
+    return n
+
+
 RUSTPYTHON_NPM = "https://cdn.jsdelivr.net/npm/rustpython_wasm@0.1.0-pre-alpha.2"
 RUSTPYTHON_FILES = ("rustpython_wasm.js", "rustpython_wasm_bg.wasm")
 
@@ -143,23 +161,10 @@ def _patch_rustpython_esm(path: Path) -> None:
                       "let wasm = {};\nexport function __pyodex_setWasm(w) { wasm = w; }", src)
     src, n2 = re.subn(r"^wasm\.__wbindgen_start\(\);", "export function __pyodex_start() { wasm.__wbindgen_start(); }",
                       src, flags=re.M)
-    # The glue's only eval-class call is wasm-bindgen's JS `Function` constructor:
-    #
-    #     return addHeapObject(new Function(varg0));
-    #
-    # MV3 extension pages cannot use it, and nothing in pyEval needs JS functions
-    # built from strings. Replacing it with a throwing stub lets the module load in a
-    # normal extension page; if a build ever does need it the failure is loud.
-    src, n3 = re.subn(
-        r"return addHeapObject\(new Function\(varg0\)\);",
-        'throw new Error("new Function is unavailable under extension CSP");',
-        src,
-    )
     if n1 != 1 or n2 != 1:
         raise RuntimeError(f"rustpython ESM patch did not apply (import={n1}, start={n2})")
     path.write_text(src)
-    if n3 != 1:
-        print(f"warning: `new Function` stub applied {n3} time(s); the glue may have changed")
+
 
 
 def ensure_url_asset(url: str, filename: str, force: bool = False) -> Path:

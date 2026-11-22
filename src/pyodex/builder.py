@@ -457,6 +457,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         page = "sandbox.html" if cfg.sandbox else "overlay.html"
         _tier_build("rustpython", "rustpython", ("rustpython_wasm.js", "rustpython_wasm_bg.wasm"),
                     "pyodex_rp.py", "rp_bootstrap.js", page=page)
+        if not cfg.sandbox:
+            # No sandbox means no eval: the glue's `new Function` must be stubbed.
+            from .deps import stub_new_function
+
+            n = stub_new_function(out / "rustpython" / "rustpython_wasm.js")
+            print(f"rustpython: new Function stubbed ({n} site) — no sandbox")
         if cfg.sandbox:
             manifest = json.loads((out / "manifest.json").read_text())
             manifest["sandbox"] = {"pages": ["sandbox.html"]}
