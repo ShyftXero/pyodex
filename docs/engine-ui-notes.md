@@ -59,6 +59,20 @@ So the break is specific: SW-initiated `chrome.runtime.sendMessage` from inside 
 message handler, versus the same call from an evaluated expression. Everything
 else in the chain is proven.
 
+## Latest finding (stage instrumentation)
+
+Placing `chrome.storage.local` markers at each stage produced **no marker at all**:
+the worker's `pyodex-attach` handler did not run. The same handler previously did
+run (an earlier build proved it with the identical technique), so the regression is
+in the current build's handler wiring or an exception thrown inside it — not in
+messaging itself. Notably, worker → content-script tab ops still return
+`{"ok":true,"payload":2}` in the same build, so the content script, the worker and
+the engine are all alive.
+
+Next move: wrap the attach handler body in try/catch that persists the thrown error
+to storage, then read it. A handler that throws synchronously returns no response and
+looks exactly like this from the outside.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
