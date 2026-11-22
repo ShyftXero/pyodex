@@ -46,6 +46,21 @@ def jsobj(d: dict) -> Any:
     return to_js(d, dict_converter=js.Object.fromEntries)
 
 
+def js_callback(fn: Callable) -> Any:
+    """Wrap a Python function for a JS callback and keep the proxy alive.
+
+    Both forms work:
+
+        req.onsuccess = js_callback(my_fn)
+
+        @js_callback
+        def onsuccess(event): ...
+    """
+    proxy = create_proxy(fn)
+    _proxies.append(proxy)
+    return proxy
+
+
 def on(target: Any, event: str) -> Callable[[Callable], Callable]:
     """Decorator: attach `fn` as an event listener and keep the proxy alive."""
 
@@ -565,6 +580,53 @@ class _EngineWidget:
         return fn
 
 
+class Element:
+    """A handle on one element of the host page.
+
+    Name the element once instead of repeating a selector at every call site. All
+    methods are async because the DOM lives in another realm.
+    """
+
+    def __init__(self, page: "Page", selector: str, index: int = 0) -> None:
+        self.page, self.selector, self.index = page, selector, index
+
+    async def exists(self) -> bool:
+        return bool(await self.page.count(self.selector))
+
+    async def text(self) -> str:
+        values = await self.page.text(self.selector)
+        return values[self.index] if len(values) > self.index else ""
+
+    async def html(self) -> str:
+        values = await self.page.html(self.selector)
+        return values[self.index] if len(values) > self.index else ""
+
+    async def attr(self, name: str) -> Any:
+        values = await self.page.attr(self.selector, name)
+        return values[self.index] if len(values) > self.index else None
+
+    async def value(self) -> Any:
+        return await self.attr("value")
+
+    async def set_value(self, value: str) -> None:
+        await self.page.set_value(self.selector, value, index=self.index)
+
+    async def set_text(self, value: str) -> None:
+        await self.page.set_text(self.selector, value, index=self.index)
+
+    async def set_attr(self, name: str, value: Any) -> None:
+        await self.page.dom("set_attr", self.selector, attr=name, value=value, index=self.index)
+
+    async def click(self) -> None:
+        await self.page.click(self.selector, index=self.index)
+
+    async def scroll_to(self) -> None:
+        await self.page.scroll_to(self.selector, index=self.index)
+
+    def __repr__(self) -> str:
+        return f"<Element {self.selector}[{self.index}]>"
+
+
 class Page:
     """Talk to the host page via the content-script bridge (postMessage)."""
 
@@ -690,6 +752,29 @@ class Page:
     async def scroll_to(self, sel: str, index: int = 0) -> None:
         await self.dom("scroll_to", sel, index=index)
 
+    def __getitem__(self, selector: str) -> "Element":
+        """`page["#price"]` — an element handle from any CSS selector.
+
+        `#id`, `.class`, `[name=user]`, `form > input` all work; there is no
+        id-only path. `page.id("price")` is the getElementById spelling.
+        """
+        return Element(self, selector)
+
+    def id(self, element_id: str, index: int = 0) -> "Element":
+        return Element(self, f"#{element_id}", index)
+
+    def sel(self, selector: str, index: int = 0) -> "Element":
+        return Element(self, selector, index)
+
+    async def wait_for(self, selector: str, *, timeout: float = 10.0) -> bool:
+        """Wait until `selector` exists; False on timeout rather than raising."""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            if await self.count(selector):
+                return True
+            await asyncio.sleep(0.1)
+        return False
+
     def subscribe(self, selector: str, events: list[str] | None = None, throttle_ms: int = 0) -> None:
         """Stream host-page events to `on_page_event` listeners."""
         self._send("page.events", {"selector": selector,
@@ -767,6 +852,104 @@ def set_badge(text: str, *, color: str = "#f43f5e") -> None:
     action.setBadgeText(jsobj({"text": text}))
     if text:
         action.setBadgeBackgroundColor(jsobj({"color": color}))
+
+
+# --------------------------------------------------------------------------- #
+# chrome.*, as a namespace rather than four loose functions
+# --------------------------------------------------------------------------- #
+
+
+class _ChromeStorage:
+    def __init__(self, area: str) -> None:
+        self._area = area
+
+    def _api(self) -> Any:
+        return getattr(_chrome_api("storage"), self._area)
+
+    async def get(self, key: str, default: Any = None) -> Any:
+        result = await self._api().get(key)
+        value = result.to_py().get(key, default) if hasattr(result, "to_py") else getattr(result, key, default)
+        return value.to_py() if hasattr(value, "to_py") else value
+
+    async def set(self, key: str, value: Any) -> None:
+        await self._api().set(jsobj({key: value}))
+
+    async def remove(self, key: str) -> None:
+        await self._api().remove(key)
+
+    async def keys(self) -> list[str]:
+        result = await self._api().get(None)
+        return list(result.to_py().keys()) if hasattr(result, "to_py") else []
+
+
+class _ChromeTabs:
+    async def query(self, **query: Any) -> list[dict]:
+        return await tabs_query(**query)
+
+    async def current(self) -> dict:
+        tabs = await tabs_query(active=True, currentWindow=True)
+        return tabs[0] if tabs else {}
+
+    async def count(self) -> int:
+        return len(await tabs_query())
+
+    async def reload(self, tab_id: int) -> None:
+        await _chrome_api("tabs").reload(tab_id)
+
+    async def create(self, url: str, *, active: bool = True) -> int:
+        tab = await _chrome_api("tabs").create(jsobj({"url": url, "active": active}))
+        return int(tab.id)
+
+
+class _ChromeAction:
+    def badge(self, text: str, *, color: str = "#f43f5e") -> None:
+        set_badge(text, color=color)
+
+    def title(self, text: str) -> None:
+        api = getattr(js.chrome, "action", None) or getattr(js.chrome, "browserAction", None)
+        api.setTitle(jsobj({"title": text}))
+
+
+class _ChromeRuntime:
+    def url(self, path: str) -> str:
+        return runtime_url(path)
+
+    @property
+    def id(self) -> str:
+        return str(js.chrome.runtime.id)
+
+    def manifest(self) -> dict:
+        m = js.chrome.runtime.getManifest()
+        return m.to_py() if hasattr(m, "to_py") else dict(m)
+
+
+class _ChromeWindows:
+    async def all(self) -> list[dict]:
+        wins = await _chrome_api("windows").getAll()
+        return [w.to_py() if hasattr(w, "to_py") else dict(w) for w in wins]
+
+
+class Chrome:
+    """`chrome.*` with Python names: `chrome.storage.local.get("k")`, etc.
+
+    Deliberately a thin namespace over the real API — anything missing is reachable
+    through `js.chrome`, and `chrome.raw` is that escape hatch by name.
+    """
+
+    local = _ChromeStorage("local")
+    sync = _ChromeStorage("sync")
+    session = _ChromeStorage("session")
+    tabs = _ChromeTabs()
+    action = _ChromeAction()
+    runtime = _ChromeRuntime()
+    windows = _ChromeWindows()
+
+    @property
+    def raw(self) -> Any:
+        return js.chrome
+
+
+chrome = Chrome()
 
 
 # --------------------------------------------------------------------------- #

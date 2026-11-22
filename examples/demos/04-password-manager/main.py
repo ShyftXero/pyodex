@@ -19,8 +19,8 @@ import asyncio
 import json
 
 import pyodex_natural as nat
-from pyodex_runtime import (Overlay, Page, create_proxy, js, keep_alive, on, status,
-                            storage_get, storage_set, to_js, urlmatch, watch_for)
+from pyodex_runtime import (Overlay, Page, chrome, js, js_callback, keep_alive, on,
+                            status, to_js, urlmatch, watch_for)
 
 VAULT = "demo04_vault"
 VAULT_FILE = f"{nat.config.data_dir}/demo04-vault.json"
@@ -99,9 +99,9 @@ async def idb_put(site: str, entry: dict) -> bool:
             fut.set_result(False)
 
     req = js.indexedDB.open(IDB_NAME, 1)
-    req.onupgradeneeded = create_proxy(on_upgrade)
-    req.onsuccess = create_proxy(on_success)
-    req.onerror = create_proxy(on_error)
+    req.onupgradeneeded = js_callback(on_upgrade)
+    req.onsuccess = js_callback(on_success)
+    req.onerror = js_callback(on_error)
     return await asyncio.wait_for(fut, 5)
 
 
@@ -122,7 +122,7 @@ async def entries() -> dict:
     data = read_file()
     if data:
         return data
-    raw = await storage_get(VAULT)
+    raw = await chrome.local.get(VAULT)
     return json.loads(raw) if isinstance(raw, str) and raw else (raw or {})
 
 
@@ -132,7 +132,7 @@ async def save(site: str, user: str, secret: str) -> dict:
     data[site] = {"user": user, "stored": stored}
     wrote_file = write_file(data)
     wrote_idb = await idb_put(site, {"user": user, "stored": stored})
-    await storage_set(VAULT, json.dumps(data))
+    await chrome.local.set(VAULT, json.dumps(data))
     return {"file": wrote_file, "indexeddb": wrote_idb, "stored": stored}
 
 
