@@ -15,7 +15,8 @@ const setStatus = (text, isError = false) => {
 };
 
 // Full traceback panel. Python errors are kept verbatim; JS errors also show stack.
-const errPanel = document.getElementById("pyodex-error");
+const DEV = {{DEV}};
+const errPanel = DEV ? document.getElementById("pyodex-error") : null;
 function showError(err, context = "error") {
   const text = err?.stack || err?.message || String(err);
   console.error(`[pyodex] ${context}:`, err);

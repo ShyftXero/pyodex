@@ -51,6 +51,7 @@ class ExtConfig:
     icon: str = ""
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
     overlay_body: str = ""  # inline alternative to overlay.body.html
+    dev: bool = True  # show the traceback panel; false = console only
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
     cache: bool = True  # digest-verified blob cache + per-site opt-out options page
     # Ordered, cheapest first. The build picks the first tier that satisfies what
@@ -131,6 +132,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         icon=ext.get("icon", ""),
         overlay_css=ext.get("overlay_css", ""),
         overlay_body=ext.get("overlay_body", ""),
+        dev=ext.get("dev", True),
         natural=ext.get("natural", True),
         cache=ext.get("cache", True),
         runtimes=ext.get("runtimes"),
@@ -373,7 +375,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
             "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html",
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html", "DEV": "true",
         }))
         resources = ["overlay.html", "bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
         # The cache surface is runtime-agnostic; the manifest references these, so
@@ -588,6 +590,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
         "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
         "OVERLAY_PAGE": "overlay.html",
+        "DEV": "true" if cfg.dev else "false",
         "TRIGGERS": json.dumps(cfg.triggers),
         "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
         "RUNTIME_PINS": json.dumps(cfg.runtime_pins),

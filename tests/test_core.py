@@ -477,3 +477,11 @@ def test_default_selection_stays_on_pyodide(tmp_path):
     built, _ = _build(tmp_path, '[extension]\nname = "Plain"\nhttp = false\n')
     plan = json.loads((built / "runtime-plan.json").read_text())
     assert plan["runtime"] == "pyodide"
+
+
+def test_dev_flag_controls_the_traceback_panel(tmp_path):
+    """Production builds should not surface a panel full of tracebacks."""
+    built, _ = _build(tmp_path, '[extension]\nname = "Prod"\ndev = false\nhttp = false\n')
+    assert "const DEV = false;" in (built / "bootstrap.js").read_text()
+    built2, _ = _build(tmp_path, '[extension]\nname = "Dev"\nhttp = false\n')
+    assert "const DEV = true;" in (built2 / "bootstrap.js").read_text()
