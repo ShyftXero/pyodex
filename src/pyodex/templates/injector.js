@@ -493,7 +493,23 @@
 
   // Announce this tab so the engine can address it. The reply is kept on window
   // so failures are diagnosable from DevTools (and by the test harness).
-  chrome.runtime.sendMessage({ kind: "pyodex-attach", url: location.href })
-    .then((r) => { window.__pyodexAttach = r; })
-    .catch((e) => { window.__pyodexAttach = { ok: false, error: String(e && e.message) }; });
+  // Retry on BOTH failure shapes: a rejected send (worker still waking) and an
+  // {ok:false} reply (engine still booting). Retrying only on rejection is a bug:
+  // the first attach is what the engine uses to start the app, and losing it is
+  // invisible from the page.
+  (function attach(attempt) {
+    const retry = () => {
+      if (attempt < 10) setTimeout(() => attach(attempt + 1), 200 * (attempt + 1));
+    };
+    chrome.runtime
+      .sendMessage({ kind: "pyodex-attach", url: location.href })
+      .then((r) => {
+        window.__pyodexAttach = r;
+        if (!r || !r.ok) retry();
+      })
+      .catch((e) => {
+        window.__pyodexAttach = { ok: false, error: String(e && e.message) };
+        retry();
+      });
+  })(0);
 })();
