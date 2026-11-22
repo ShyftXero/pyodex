@@ -450,7 +450,10 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
 
         src = ensure_brython()
         (out / "brython").mkdir()
-        shutil.copy2(src / "brython.min.js", out / "brython" / "brython.min.js")
+        from .deps import BRYTHON_FILES
+
+        for name in BRYTHON_FILES:  # both the runtime and its stdlib
+            shutil.copy2(src / name, out / "brython" / name)
         shutil.copy2(RUNTIME / "pyodex_br.py", out / "pyodex_br.py")
         (out / "bootstrap.js").write_text(_render((TEMPLATES / "br_bootstrap.js").read_text(), {"NAME": cfg.name}))
         app = out / "app"
@@ -465,16 +468,18 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
                                     if (project / "overlay.body.html").exists() else "")
         css = cfg.overlay_css or ((project / "overlay.css").read_text()
                                   if (project / "overlay.css").exists() else "")
+        combined = (RUNTIME / "pyodex_br.py").read_text() + "\n" + (project / cfg.entry).read_text()
         (out / "overlay.html").write_text(
             "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>" + cfg.name + "</title>"
             "<style>html,body{margin:0;height:100%;background:transparent;pointer-events:none}"
             "#pyodex-status{position:fixed;bottom:8px;right:8px;z-index:2147483647;font:11px system-ui;"
             "color:#fff;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}"
             "#pyodex-status.hidden{display:none}button{pointer-events:auto}</style>"
-            "<script src='brython/brython.min.js'></script></head><body>"
+            "<script src='brython/brython.min.js'></script>"
+            "<script src='brython/brython_stdlib.min.js'></script></head><body>"
             + body +
             "<div id='pyodex-status'>Loading Brython…</div>"
-            "<script type='text/python' src='app/combined.py'></script>"
+            "<script type='text/python'>" + combined + "</script>"
             "<script src='brython_run.js'></script>"
             "</body></html>\n")
         (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {

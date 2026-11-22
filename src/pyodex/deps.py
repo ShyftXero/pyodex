@@ -149,7 +149,9 @@ def _patch_rustpython_esm(path: Path) -> None:
 
 
 BRYTHON_NPM = "https://cdn.jsdelivr.net/npm/brython@3.12.4"
-BRYTHON_FILES = ("brython.min.js",)
+# brython_stdlib.js is required for Brython to initialise at all (its module
+# system imports it), so the tier is ~5.5 MB rather than 1.1 MB.
+BRYTHON_FILES = ("brython.min.js", "brython_stdlib.min.js")
 
 
 def ensure_brython(force: bool = False) -> Path:

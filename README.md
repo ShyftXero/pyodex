@@ -215,7 +215,7 @@ each one is a **capability** claim, not just a size, so selection is mechanical:
 | Tier | ~Size | Capabilities | Status |
 |---|---|---|---|
 | `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
-| `brython` | 1.1 MB | DOM, no wasm at all | vendored, **does not reach main.py yet** (see below) |
+| `brython` | 5.5 MB | DOM, no wasm at all | vendored (runtime + stdlib), **does not execute app code yet** |
 | `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | **implemented** — runs in an MV3 sandbox page (its glue needs `eval`) |
 | `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
 
@@ -243,15 +243,15 @@ cache is runtime-agnostic too: `cache_patterns()` covers MicroPython and RustPyt
 URLs even though we ship neither, so other pages running those runtimes are served
 from our cache when a digest is pinned.
 
-**Brython** was added as the third tier precisely because it needs no wasm glue and
-no ESM-integration flag. It is vendored (1.1 MB) and the overlay is built the way
-Brython expects — `<script type="text/python" src="app/combined.py">` with the shim
-concatenated ahead of the app, plus an external trigger (CSP forbids inline). What
-blocks it: `brython@3.12.4/brython.min.js` exposes **no public entry point** —
-`window.brython`, `__BRYTHON__.brython` and `__BRYTHON__.run` are all `undefined`
-after load — so there is nothing for us to call, and its own auto-run never
-compiles our script. Next step would be shipping `brython_stdlib.js` (4.4 MB) or
-finding the documented bootstrap for this build. L13 is experimental.
+**Brython** was the other candidate (no wasm, no glue, no eval flag). It is
+vendored with its stdlib (5.5 MB — Brython will not initialise without it) and the
+overlay is built both ways Brython documents: an external
+`<script type="text/python" src>` and an inline one (CSP-safe, since the browser
+never executes `text/python`). Neither executes our code, and there is nothing to
+call instead: in `brython@3.12.4`, `brython()` is closure-scoped — `window.brython`,
+`__BRYTHON__.brython` and `__BRYTHON__.run` are all `undefined` after load, so its
+auto-run is the only path and it does not pick up our script. Next attempt would be
+the unminified `brython.js`, where the entry point is not tree-shaken away.
 
 **RustPython works, in a sandbox page.** Two obstacles, both solved:
 
