@@ -17,6 +17,9 @@ let pyodidePromise = null;
 let appStarted = false;
 const ports = new Map(); // agentId -> port
 const pending = new Map(); // requestId -> resolve
+function broadcast(text) {
+  for (const p of ports.values()) p.postMessage({ kind: "log", text });
+}
 let seq = 0;
 
 async function engine() {
@@ -24,6 +27,10 @@ async function engine() {
     pyodidePromise = (async () => {
       const { loadPyodide } = await import("./pyodide/pyodide.mjs");
       const py = await loadPyodide({ indexURL: asset("pyodide/") });
+      try {
+        const v = py.runPython("1+1");
+      } catch (e) {
+      }
       const read = async (p) => (await fetch(asset(p))).text();
       py.FS.writeFile("/home/pyodide/pyodex_runtime.py", await read("pyodex_runtime.py"));
       py.FS.writeFile("/home/pyodide/pyodex_natural.py", await read("pyodex_natural.py"));
@@ -48,6 +55,10 @@ function tabOp(agentId, op, args) {
   });
 }
 
+// Python reports failures here; without it a traceback in the shared worker is
+// invisible (no DOM, no chrome.storage, no DevTools in the harness).
+globalThis.pyodexReportError = (msg) => broadcast("py-err:" + String(msg).replace(/\s+/g, " ").slice(0, 220));
+
 globalThis.pyodexEngine = {
   currentTabId: () => [...ports.keys()].pop() ?? null,
   tabOp,
@@ -55,13 +66,16 @@ globalThis.pyodexEngine = {
 
 async function attach(agentId, url) {
   const py = await engine();
+  broadcast("booting");
   if (!appStarted) {
     appStarted = true;
     const code = await (await fetch(asset("app/main.py"))).text();
-    await py.runPythonAsync(code);
+    // runPythonAsync never settles in a SharedWorker (no JSPI/event-loop driver);
+    // the synchronous entry works, and app modules run at import time anyway.
+    py.runPython(code);
   }
   try {
-    await py.runPythonAsync(
+    py.runPython(
       `import pyodex_runtime as _r; _r._engine_attached(${JSON.stringify(agentId)}, ${JSON.stringify(url || "")})`
     );
     return { ok: true };

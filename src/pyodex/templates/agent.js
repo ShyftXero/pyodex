@@ -8,9 +8,17 @@
   const worker = new SharedWorker(chrome.runtime.getURL("engine_worker.js"));
   worker.port.start();
 
+  const log = (t) => {
+    const cur = document.body.dataset.log || "";
+    document.body.dataset.log = (cur ? cur + " | " : "") + t;
+  };
+
   worker.port.onmessage = (ev) => {
     const msg = ev.data || {};
+    if (msg.kind === "log") { log(msg.text); return; }
+    if (msg.kind === "attach-reply") { log("attach:" + JSON.stringify(msg.reply).slice(0, 80)); return; }
     if (msg.kind === "error") {
+      log("err:" + String(msg.error).slice(0, 80));
       window.parent.postMessage({ pyodex: true, kind: "agent-error", error: msg.error }, "*");
       return;
     }

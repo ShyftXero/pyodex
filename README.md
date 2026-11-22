@@ -469,43 +469,45 @@ clear/import/export. Opting a host out purges its entries immediately.
 Proven by harness level L5: one network request for a blob across two page loads,
 refetch on digest mismatch, and a re-fetch on every load once the host opts out.
 
-## Shared interpreter (experimental)
+## Shared interpreter
 
-By default every tab that runs the extension has its own interpreter — isolation
-and per-tab DOM, at tens of MB per tab. `engine = "shared"` adds a single
-offscreen interpreter for the whole browser: sockets, caches and module state stay
-warm, and a second tab costs no wasm boot.
+`ui = "engine"` runs **one Pyodide for the whole browser**: the interpreter lives in
+a SharedWorker, and tabs hold none at all — no overlay iframe, no per-tab heap.
 
 ```toml
 [extension]
 engine = "shared"
+ui = "engine"
 ```
 
 ```python
-from pyodex_runtime import shared_run, shared_status
+from pyodex_runtime import Overlay, Page, on_attach
 
-info = await shared_run("import sys; sys.version_info[:2]")
-print(info["value"], (await shared_status())["bootId"])
+ui = Overlay()
+
+@on_attach
+async def attached(page: Page, url: str) -> None:
+    ui.button("Inspect", id="go")          # painted in that tab, by Python
+    if "login" in url:
+        await page.set_value("input[name=user]", "…")   # executed in that tab
 ```
 
-The engine is an offscreen document (`engine.html`) held by the service worker.
-Tabs reach it over the worker; the boot id in `shared_status()` identifies the
-instance, so two tabs returning the same id proves they share it — that is what
-harness level L8 asserts.
+Harness L9 (in the gate) asserts the two properties that matter: **two tabs are
+filled by a single engine**, and **neither tab has an overlay iframe**.
 
-Measured cost of the per-tab alternative, and what the engine does and does not
-remove, is in [`docs/memory.md`](docs/memory.md): **~55 MB per tab with an active
-overlay**, and the shipped `engine = "shared"` does not reduce that today.
+Why a SharedWorker rather than an offscreen document — both were tried:
 
-`ui = "engine"` (tabs hold no interpreter, Python paints into them) is **not
-finished** — see [`docs/engine-ui-notes.md`](docs/engine-ui-notes.md) for exactly
-where it breaks and the cheapest next steps.
+| | offscreen document | SharedWorker |
+|---|---|---|
+| observable in our Chromium | **no** (scripts never execute) | yes (`boots:1`, `boots:2`) |
+| lifetime | survives zero tabs | ends with the last connection |
+| `chrome.*` available | yes | **none** — resolves assets from its own URL |
 
-Scope, stated honestly: this shares the **interpreter**, which is where the memory
-goes. Per-tab overlay DOM still lives in the tab, because moving UI into the
-engine would make `Overlay`/`Page` async for every app. That migration is the open
-question in [`docs/shared-engine.md`](docs/shared-engine.md) and is deliberately
-not done yet.
+So: SharedWorker for the interpreter, offscreen still the right host for work that
+must outlive every tab. Details, including the five silent failures that had to be
+fixed (no `chrome.*` in a worker, `runPythonAsync` never settling, `js.document` at
+import time, string agent ids coerced with `int()`, and invisible tracebacks), are in
+[`docs/engine-ui-notes.md`](docs/engine-ui-notes.md).
 
 ## Networking: what the browser actually allows
 

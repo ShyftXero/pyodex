@@ -13,8 +13,17 @@ from typing import Any, Callable
 import js
 from pyodide.ffi import create_proxy, to_js
 
-document = js.document
-window = js.window
+# Workers (including the shared engine) have no document/window: resolve these
+# lazily so the module imports anywhere Python can run.
+def _maybe(name):
+    try:
+        return getattr(js, name)
+    except AttributeError:
+        return None
+
+
+document = _maybe("document")
+window = _maybe("window")
 
 _proxies: list[Any] = []  # keep event proxies alive
 
@@ -422,8 +431,9 @@ class Overlay:
             # No tab has attached yet (this is import time). A widget created
             # before its tab exists is a no-op rather than a crash.
             return
+        # Agent ids are opaque strings ("a1b2c3") — never coerce them.
         # Fire-and-forget: UI creation must not make every app's code async.
-        eng.tabOp(int(raw), op, jsobj(args))
+        eng.tabOp(raw, op, jsobj(args))
 
     def button(self, label: str, *, top: int | None = None, left: int | None = None,
                right: int | None = None, bottom: int | None = None, id: str | None = None) -> Any:
@@ -524,7 +534,7 @@ class Page:
         if engine_mode():
             # Shared engine: ask the worker to run the op in this Page's tab.
             eng = _engine()
-            tab = self.tab_id if self.tab_id is not None else int(eng.currentTabId())
+            tab = self.tab_id if self.tab_id is not None else eng.currentTabId()
             reply = await eng.tabOp(tab, op, jsobj({"sel": sel, **kw}))
             data = reply.to_py() if hasattr(reply, "to_py") else dict(reply)
             if not data.get("ok", False):

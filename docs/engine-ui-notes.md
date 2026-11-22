@@ -1,4 +1,48 @@
-# engine-ui: where it stands
+# engine-ui: it works (SharedWorker host)
+
+`ui = "engine"` runs: **one Pyodide in a SharedWorker** serves every tab, and the
+tabs hold no interpreter at all. Harness L9 is in the gate and asserts that two
+separate tabs are both filled by that single engine, with no overlay iframe in
+either.
+
+## Why this shape
+
+- **Offscreen documents are a dead end here.** Chrome's offscreen API creates the
+  document but the harness never observed its scripts executing (a two-line control
+  page never wrote its marker, headless or headed). A SharedWorker, by contrast, is
+  observable and genuinely one instance (`boots:1`, `boots:2` from two pages).
+- **A SharedWorker of an extension origin has no `chrome.*`.** Verified:
+  `typeof chrome === "undefined"`. So the worker resolves every asset from its own
+  `location` and reports errors over a port, never via `chrome.storage`.
+- **Workers cannot message content scripts**, so each tab contributes a tiny agent
+  iframe that relays DOM operations over its port; the content script executes them
+  in the page.
+
+```
+content script ──postMessage──▶ per-tab agent iframe ──port──▶ SharedWorker
+      ▲                                                          (ONE Pyodide,
+      └──────────── DOM ops + replies ◀───────────────────────   per-tab sessions)
+```
+
+## Bugs this cost, in order (each one silent)
+
+1. **No `chrome.*` in a shared worker** — `engine_worker.js` died on its first
+   `chrome.runtime.getURL(...)`. Now uses `new URL(rel, self.location.href)`.
+2. **`runPythonAsync` never settles in a SharedWorker.** `py.runPython("1+1")`
+   works, so execution is fine; the async entry simply never resolves without a
+   host event loop pumping it. The engine uses the synchronous entry.
+3. **`document = js.document` at import time** — a worker has no `document`, so
+   importing `pyodex_runtime` hung. Those globals are resolved lazily now.
+4. **Agent ids were coerced with `int()`** — they are opaque strings (`a1b2c3`),
+   so every DOM op raised inside `_engine_attached`.
+5. **Tracebacks were invisible**: no `pyodexReportError` in the worker. Errors now
+   broadcast over the port, which is how (4) was found.
+
+Each of these failed *silently* — no exception surfaced anywhere a human looks.
+The lesson worth keeping: in a worker, if you have no reporting channel, you have
+no debugging. Build the channel before the feature.
+
+## History
 
 `ui = "engine"` is the mode that makes Python-drawn UI free per tab: the tab holds
 no interpreter, the shared engine paints into it. It is **not finished**; harness
