@@ -37,6 +37,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,18 @@ PAGE_CACHE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pyo
 </script>
 </body></html>"""
 
+SHOP_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Shop</title></head>
+<body><h1 id="item" data-item="Wireless mouse">Wireless mouse</h1>
+<p>Price: <span id="p" data-price="PRICE">PRICE</span></p></body></html>"""
+
+PHISH_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Links</title></head>
+<body>
+  <a href="https://example.com/a">ok</a>
+  <a href="https://paypa1.com/login">lookalike</a>
+  <a href="https://gogle.com/">near miss</a>
+  <a href="https://paypal.com.evil.example/">subdomain trick</a>
+</body></html>"""
+
 PLAIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plain</title></head>
 <body><h1>Nothing to see</h1><p id="plain">plain page</p></body></html>"""
 
@@ -120,6 +133,23 @@ MP_SHA = __import__("hashlib").sha256(MP_BLOB).hexdigest()
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
+        if self.path.startswith("/phish"):
+            body = PHISH_PAGE.encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/shop/"):
+            price = parse_qs(urlsplit(self.path).query).get("price", ["0"])[0]
+            body = SHOP_PAGE.replace("PRICE", price).encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.startswith("/blob/"):
             body = BLOBS.payload(self.path.rsplit("/", 1)[-1].split("?")[0])
             self.send_response(200)
@@ -276,6 +306,7 @@ class Level:
     rank: int = 0  # ordering for the monotonicity check
     needs: tuple[str, ...] = field(default_factory=tuple)
     experimental: bool = False  # not part of the gate yet
+    demo: str = ""  # build from examples/demos/<demo> instead of tests/fixtures
 
 
 LEVELS = [
@@ -296,6 +327,16 @@ LEVELS = [
     Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11,
           ("primary", "echo")),
     Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier in a sandbox page", 12, ("primary",)),
+    Level("L14", "demo-01-minimal-ui", "", "demo 01: minimal UI renders and reacts", 14, ("primary",),
+          demo="01-minimal-ui"),
+    Level("L15", "demo-02-price-compare", "", "demo 02: collects prices, shows the cheapest", 15, ("primary",),
+          demo="02-price-compare"),
+    Level("L16", "demo-03-anti-phishing", "", "demo 03: flags lookalike domains", 16, ("primary",),
+          demo="03-anti-phishing"),
+    Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
+          demo="04-password-manager"),
+    Level("L18", "demo-05-tab-watcher", "", "demo 05: always-on watcher, shared interpreter", 18, ("primary",),
+          demo="05-tab-watcher"),
 ]
 
 
@@ -781,6 +822,138 @@ def check_l12(level, ctx, env, c: Checks) -> None:
              bool(marker and marker.startswith("inputs=")), f"marker={marker!r}")
 
 
+def check_l14(level, ctx, env, c: Checks) -> None:
+    """Demo 01: the card renders, the badge counts, the click handler runs."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    text = wait_for(lambda: "Python is running" in frame_text(frame) and frame_text(frame), 60)
+    c.expect("card rendered with body text", bool(text), f"text={frame_text(frame)[:120]!r}")
+    c.expect("badge shows initial count", "0 clicks" in (text or ""), f"text={(text or '')[:120]!r}")
+
+    frame.click("#demo-btn")
+    after = wait_for(lambda: "1 click" in frame_text(frame) and frame_text(frame), 30)
+    c.expect("click handler ran and updated badge", bool(after), f"text={frame_text(frame)[:160]!r}")
+    c.expect("body text updated too", "You clicked 1 time" in (after or ""), f"text={(after or '')[:160]!r}")
+
+
+def check_l15(level, ctx, env, c: Checks) -> None:
+    """Demo 02: two shop pages, one persistent comparison."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/shop/a?price=42.00")
+    frame = overlay_frame(page, 60000)
+    if not c.expect("boots on a price page without a click", frame is not None, "no overlay frame"):
+        return
+    first = wait_for(lambda: "cheapest" in frame_text(frame) and frame_text(frame), 60)
+    c.expect("first shop recorded", bool(first), f"text={frame_text(frame)[:160]!r}")
+    c.expect("first price shown", "42.00" in (first or ""), f"text={(first or '')[:160]!r}")
+
+    second = ctx.new_page()
+    second.goto(f"{env['base']}/shop/b?price=30.00")
+    sframe = overlay_frame(second, 60000)
+    if not c.expect("boots on the second shop", sframe is not None, "no overlay frame"):
+        return
+    both = wait_for(lambda: "30.00" in frame_text(sframe) and "42.00" in frame_text(sframe)
+                    and frame_text(sframe), 60)
+    c.expect("both shops compared", bool(both), f"text={frame_text(sframe)[:200]!r}")
+    c.expect("cheapest is the lower price", "cheapest: 30.00" in (both or ""), f"text={(both or '')[:200]!r}")
+    second.close()
+
+
+def check_l16(level, ctx, env, c: Checks) -> None:
+    """Demo 03: scan a page of links and flag the lookalikes."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/phish")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    c.expect("prompts to scan", bool(wait_for(lambda: "Press Scan" in frame_text(frame), 60)),
+             f"text={frame_text(frame)[:120]!r}")
+    frame.click("#scan-btn")
+    text = wait_for(lambda: "flagged" in frame_text(frame) and frame_text(frame), 60)
+    c.expect("scan produced flags", bool(text), f"text={frame_text(frame)[:160]!r}")
+    c.expect("digit-substitution domain caught", "paypa1.com" in (text or ""), f"text={(text or '')[:200]!r}")
+    c.expect("near-miss domain caught", "gogle.com" in (text or ""), f"text={(text or '')[:200]!r}")
+    c.expect("subdomain trick caught", "paypal.com.evil.example" in (text or ""), f"text={(text or '')[:240]!r}")
+    c.expect("clean domain not flagged", "example.com\n" not in (text or ""), f"text={(text or '')[:240]!r}")
+
+
+def check_l17(level, ctx, env, c: Checks) -> None:
+    """Demo 04: save a credential through the UI, reload, fill it back in."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/login.html")
+    frame = overlay_frame(page, 60000)
+    if not c.expect("boots on a login form", frame is not None, "no overlay frame"):
+        return
+    c.expect("offers to save", bool(wait_for(lambda: "No credentials saved" in frame_text(frame), 60)),
+             f"text={frame_text(frame)[:140]!r}")
+
+    frame.fill("#vault-user", "demo@example.com")
+    frame.fill("#vault-pass", "s3cret-value")
+    frame.click("#save-btn")
+    c.expect("save acknowledged",
+             bool(wait_for(lambda: "saved for demo@example.com" in frame_text(frame), 60)),
+             f"text={frame_text(frame)[:160]!r}")
+
+    page.reload()
+    f2 = overlay_frame(page, 60000)
+    if not c.expect("boots again after reload", f2 is not None, "no overlay frame"):
+        return
+    c.expect("vault survived reload",
+             bool(wait_for(lambda: "saved for demo@example.com" in frame_text(f2), 60)),
+             f"text={frame_text(f2)[:160]!r}")
+    f2.click("#fill-btn")
+    c.expect("password filled into the page",
+             bool(wait_for(lambda: page.input_value("#pw") == "s3cret-value", 30)),
+             f"pw={page.input_value('#pw')!r}")
+    c.expect("username filled into the page", page.input_value("#user") == "demo@example.com",
+             f"user={page.input_value('#user')!r}")
+
+
+def check_l18(level, ctx, env, c: Checks) -> None:
+    """Demo 05: three tabs, one interpreter, a shared counter.
+
+    With ui="engine" the widgets are painted by the per-tab *agent*, not by the page,
+    so the assertion reads the agent frame's shadow root — looking at the page finds
+    nothing (a mistake worth remembering).
+    """
+
+    def agent_text(page, needle: str, timeout: float = 90):
+        def probe():
+            for f in page.frames:
+                if "agent.html" not in (f.url or ""):
+                    continue
+                txt = f.evaluate(
+                    """() => {
+                        const h = document.getElementById('pyodex-agent-ui');
+                        if (!h || !h.shadowRoot) return '';
+                        return [...h.shadowRoot.querySelectorAll('.badge,.card-body')]
+                               .map(e => e.textContent).join(' | ');
+                    }""")
+                if needle in (txt or ""):
+                    return txt
+            return None
+        return wait_for(probe, timeout)
+
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    first = agent_text(page, "tab(s) seen")
+    c.expect("first tab paints its badge in the agent", bool(first), "no badge in the agent shadow root")
+    c.expect("counts 1 tab", "1 tab(s) seen" in (first or ""), f"text={(first or '')[:140]!r}")
+    c.expect("no overlay iframe (no per-tab interpreter)",
+             not any("overlay.html" in (f.url or "") for f in page.frames), "overlay iframe present")
+
+    second = ctx.new_page()
+    second.goto(f"{env['base']}/login.html")
+    two = agent_text(second, "2 tab(s) seen")
+    c.expect("second tab sees the shared count of 2", bool(two), f"text={(two or '')[:160]!r}")
+    second.close()
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -796,6 +969,11 @@ CHECKS = {
     "L10": check_l10,
     "L11": check_l11,
     "L12": check_l12,
+    "L14": check_l14,
+    "L15": check_l15,
+    "L16": check_l16,
+    "L17": check_l17,
+    "L18": check_l18,
 }
 
 
@@ -868,9 +1046,14 @@ def _write_compat_fixture(dst: Path) -> None:
 def prepare(level: Level, work: Path, ports: dict) -> Path:
     from pyodex.builder import build_extension
 
-    dst = work / level.fixture
+    dst = work / level.fixture or (work / level.demo)
     if dst.exists():
         shutil.rmtree(dst)
+
+    if level.demo:
+        src = ROOT / "examples" / "demos" / level.demo
+        shutil.copytree(src, dst)
+        return build_extension(dst, work / "dist" / level.slug)
     if level.name == "L6":
         src = FIXTURES / level.fixture
         shutil.copytree(src, dst)

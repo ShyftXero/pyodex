@@ -1,0 +1,8 @@
+[extension]
+name = "Demo 04 Password Manager"
+version = ""
+description = "A teaching password manager: stores credentials per site locally and fills them."
+matches = ["<all_urls>"]
+boot = "trigger"
+reap_hidden_after = 0
+http = false

@@ -461,6 +461,64 @@
       r.append(b);
       return { ok: true };
     }
+    if (name === "ui_badge") {
+      const b = document.createElement("div");
+      b.textContent = args.text;
+      Object.assign(b.style, {
+        position: "fixed", top: (args.top ?? 16) + "px", zIndex: 10,
+        padding: "4px 10px", borderRadius: "999px", pointerEvents: "none",
+        font: "600 12px system-ui, sans-serif", color: "#fff",
+        background: args.color || "#f43f5e",
+      });
+      if (args.right != null) b.style.right = args.right + "px";
+      else b.style.left = (args.left ?? 16) + "px";
+      r.append(b);
+      return { ok: true };
+    }
+    if (name === "ui_card") {
+      let wrap = r.querySelector("#" + CSS.escape(args.id || "pyodex-card"));
+      if (!wrap) {
+        wrap = document.createElement("div");
+        wrap.id = args.id || "pyodex-card";
+        Object.assign(wrap.style, {
+          position: "fixed", top: (args.top ?? 16) + "px", left: (args.left ?? 16) + "px",
+          width: (args.width ?? 300) + "px", pointerEvents: "auto", zIndex: 10,
+          background: "rgba(24,24,27,.95)", color: "#fff", borderRadius: "8px",
+          overflow: "hidden", font: "13px/1.5 system-ui, sans-serif",
+        });
+        const head = document.createElement("div");
+        head.className = "card-head";
+        Object.assign(head.style, { padding: "10px 12px", fontWeight: "600",
+          background: "rgba(244,63,94,.14)", borderBottom: "1px solid rgba(255,255,255,.08)" });
+        const bod = document.createElement("div");
+        bod.className = "card-body";
+        bod.style.padding = "12px";
+        wrap.append(head, bod);
+        r.append(wrap);
+      }
+      const head = wrap.querySelector(".card-head");
+      const bod = wrap.querySelector(".card-body");
+      if (args.title !== undefined) head.textContent = args.title;
+      if (args.text !== undefined) bod.textContent = String(args.text);
+      return { ok: true };
+    }
+    if (name === "ui_input") {
+      let inp = r.querySelector("#" + CSS.escape(args.id || "pyodex-input"));
+      if (!inp) {
+        inp = document.createElement("input");
+        inp.id = args.id || "pyodex-input";
+        Object.assign(inp.style, {
+          display: "block", width: "100%", boxSizing: "border-box", marginTop: "8px",
+          padding: "8px 10px", borderRadius: "6px", border: "1px solid #3f3f46",
+          background: "#18181b", color: "#fff", font: "13px system-ui, sans-serif",
+          pointerEvents: "auto",
+        });
+        if (args.type) inp.type = args.type;
+        r.append(inp);
+      }
+      if (args.placeholder) inp.placeholder = args.placeholder;
+      return { ok: true };
+    }
     if (name === "ui_panel") {
       let el = r.querySelector(`#${CSS.escape(args.id)}`);
       if (!el) {

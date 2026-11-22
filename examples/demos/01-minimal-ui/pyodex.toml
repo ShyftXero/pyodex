@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 01 Minimal UI"
+version = ""
+description = "The smallest useful pyodex app: a card, a badge, a button, a click handler."
+matches = ["<all_urls>"]
+boot = "user"
+http = false

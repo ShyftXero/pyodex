@@ -22,9 +22,18 @@ from .scaffold import init_project
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
+    from .scaffold import available_demos, init_demo
+
     target = Path(args.dir).resolve()
+    if args.demo:
+        init_demo(target, args.demo)
+        print(f"scaffolded demo {args.demo} into {target}")
+        print(f"build it with: pyodex build {target}")
+        return 0
     init_project(target, name=args.name or target.name, matches=args.match)
     print(f"scaffolded {target}")
+    if args.list_demos:
+        print("demos:", ", ".join(available_demos()))
     return 0
 
 
@@ -148,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("dir")
     s.add_argument("--name", help="extension display name (default: dir name)")
     s.add_argument("--match", action="append", help="URL match pattern (repeatable). Default: <all_urls>")
+    s.add_argument("--demo", help="scaffold from a bundled demo, e.g. --demo 01")
+    s.add_argument("--list-demos", action="store_true", help="print the bundled demos")
     s.set_defaults(fn=_cmd_init)
 
     s = sub.add_parser("fetch", help="download Pyodide runtime into the cache")

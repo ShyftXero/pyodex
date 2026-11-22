@@ -95,6 +95,13 @@ onconnect = (event) => {
       port.postMessage({ kind: "attach-reply", reply: await attach(msg.agentId, msg.url) });
       return;
     }
+    if (msg.kind === "ui-event") {
+      engine()
+        .then((py) => py.runPython(
+          `import pyodex_runtime as _r; _r._engine_ui_event(${JSON.stringify(msg.id)}, ${JSON.stringify(msg.event)})`))
+        .catch((e) => broadcast("ui-event error: " + String(e && e.message)));
+      return;
+    }
     if (msg.kind === "dom-reply") {
       const resolve = pending.get(msg.id);
       if (resolve) {

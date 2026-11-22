@@ -207,6 +207,64 @@ On build, `pyodex`:
 Packages Pyodide ships itself (numpy, pandas, cryptography, ...) are pinned to
 Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 
+## Demos
+
+Five extensions, all pure Python, escalating from "does the loop work" to the
+shared-interpreter architecture. Every one is built by `pyodex build`, loaded in real
+Chromium, and asserted by a harness level — they are checked artifacts, not prose.
+
+```
+uv run pyodex init my-ext --demo 03      # scaffold from any of them
+uv run pyodex init --list-demos
+```
+
+| # | Demo | Shows | pyodex features |
+|---|---|---|---|
+| 01 | `01-minimal-ui` | render, react, count | `Overlay.card/badge/button`, `@on` |
+| 02 | `02-price-compare` | reading the page and remembering between visits | `@urlmatch` + `@watch_for`, `Page.text/attr`, `storage_get/set` |
+| 03 | `03-anti-phishing` | analysis in Python with explainable reasons | `Page.attr` (bulk), edit distance, `Overlay.card` |
+| 04 | `04-password-manager` | credential store + autofill | `Page.fill({...})`, `Overlay.input`, `keep_alive` |
+| 05 | `05-tab-watcher` | always-on, one interpreter for the browser | `engine = "shared"` + `ui = "engine"`, `@on_attach` |
+
+Demo 01 — the smallest thing that works:
+
+```python
+from pyodex_runtime import Overlay, on
+
+ui = Overlay()
+card = ui.card("Demo 01 — minimal UI")
+badge = ui.badge("0 clicks")
+btn = ui.button("Click me", top=16, right=16, id="demo-btn")
+
+@on(btn, "click")
+def clicked(_event):
+    badge.innerText = "1 click"
+```
+
+Demo 02 — boot only where it matters, then remember:
+
+```python
+@urlmatch(["http://*", "https://*"])
+@watch_for("[data-price]")
+def price_seen():
+    asyncio.ensure_future(collect())      # no click; the page decided
+```
+
+Demo 05 — one interpreter, every tab (~1 MB/tab instead of ~55 MB):
+
+```python
+@on_attach
+async def attached(page: Page, url: str) -> None:
+    ui.badge(f"{len(seen)} tab(s) seen")   # shared state, per-tab paint
+    card = ui.card("Demo 05 — tab watcher")
+    card.body.innerText = f"This tab: {host_of(url)}\nTabs seen: {len(seen)}"
+```
+
+Two notes that cost time and are worth inheriting: in `ui = "engine"` mode the widgets
+are painted by the per-tab **agent**, so a test (or a human) must look inside that
+agent's shadow root, not at the page; and `status()` is a no-op there because the
+interpreter has no local DOM — use a badge or a card for per-tab state.
+
 ## Runtime tiers
 
 A pyodex app does not have to run on Pyodide. Tiers are ordered cheapest first and

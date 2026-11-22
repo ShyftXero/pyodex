@@ -1,0 +1,8 @@
+[extension]
+name = "Demo 02 Price Compare"
+version = ""
+description = "Collects the price on each shop page you visit and shows the cheapest."
+matches = ["<all_urls>"]
+boot = "trigger"
+reap_hidden_after = 0
+http = false

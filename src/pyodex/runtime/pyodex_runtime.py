@@ -72,7 +72,13 @@ def _camel(s: str) -> str:
 
 
 def status(text: str | None, error: bool = False) -> None:
-    """Show/hide the built-in bottom-right status pill. `None` hides it."""
+    """Show/hide the built-in bottom-right status pill. `None` hides it.
+
+    In engine mode there is no local document (the interpreter is in a worker), so
+    this is a no-op: use a badge or a card for per-tab state.
+    """
+    if document is None:
+        return
     s = document.getElementById("pyodex-status")
     if not s:
         return
@@ -457,9 +463,82 @@ class Overlay:
         base.update(style)
         return self.mount(el("div", id=id, **base))
 
+    def card(self, title: str = "", *, id: str | None = None, top: int = 16, left: int = 16,
+             width: int = 300, **style: str) -> Any:
+        """A titled panel: the shape every demo wants and nobody wants to re-style."""
+        if engine_mode():
+            widget_id = id or f"pyodex-card-{abs(hash(title)) % 10000}"
+            self._engine_op("ui_card", {"id": widget_id, "title": title, "top": top, "left": left,
+                                        "width": width})
+            return _EngineCard(widget_id, self)
+        wrap = self.panel(id=id, top=f"{top}px", left=f"{left}px",
+                          width=f"{width}px", padding="0", overflow="hidden", **style)
+        head = el("div", text=title, padding="10px 12px", font="600 13px system-ui, sans-serif",
+                  background="rgba(244,63,94,.14)", border_bottom="1px solid rgba(255,255,255,.08)")
+        body = el("div", padding="12px", font="13px/1.5 system-ui, sans-serif")
+        wrap.appendChild(head)
+        wrap.appendChild(body)
+        wrap.head = head
+        wrap.body = body
+        return wrap
+
+    def badge(self, text: str, *, color: str = "#f43f5e", top: int = 16, left: int | None = None,
+              right: int | None = None) -> Any:
+        """Tiny status pill, for counts and one-word state."""
+        if engine_mode():
+            self._engine_op("ui_badge", {"text": text, "color": color, "top": top,
+                                         "right": right, "left": left})
+            return _EngineWidget("pyodex-badge")
+        pos = {"top": f"{top}px"}
+        if right is not None:
+            pos["right"] = f"{right}px"
+        else:
+            pos["left"] = f"{left if left is not None else 16}px"
+        return self.mount(el("div", text=text, position="fixed", pointer_events="none",
+                             z_index="10", padding="4px 10px", border_radius="999px",
+                             font="600 12px system-ui, sans-serif", color="#fff",
+                             background=color, box_shadow="0 2px 8px rgba(0,0,0,.3)", **pos))
+
+    def input(self, placeholder: str = "", *, id: str | None = None, parent: Any = None,
+              **style: str) -> Any:
+        if engine_mode():
+            widget_id = id or f"pyodex-input-{abs(hash(placeholder)) % 10000}"
+            self._engine_op("ui_input", {"id": widget_id, "placeholder": placeholder})
+            return _EngineWidget(widget_id)
+        e = el("input", id=id, placeholder=placeholder, padding="8px 10px", width="100%",
+               box_sizing="border-box", border_radius="6px", border="1px solid #3f3f46",
+               background="#18181b", color="#fff", font="13px system-ui, sans-serif",
+               pointer_events="auto", **style)
+        (parent.body if parent is not None and hasattr(parent, "body") else self.body).appendChild(e)
+        return e
+
     def layer(self, *, id: str | None = None) -> Any:
         """Full-screen non-interactive container (e.g. for a canvas)."""
         return self.mount(el("div", id=id, position="fixed", inset="0", pointer_events="none"))
+
+
+class _EngineCard:
+    """Card handle in engine mode: setting head/body text sends an op."""
+
+    class _Part:
+        def __init__(self, card: "_EngineCard", field: str) -> None:
+            self._card, self._field = card, field
+
+        @property
+        def innerText(self) -> str:
+            return ""
+
+        @innerText.setter
+        def innerText(self, value: str) -> None:
+            payload = {"id": self._card.id}
+            payload[self._field] = str(value)
+            self._card.overlay._engine_op("ui_card", payload)
+
+    def __init__(self, widget_id: str, overlay: Any) -> None:
+        self.id = widget_id
+        self.overlay = overlay
+        self.head = _EngineCard._Part(self, "title")
+        self.body = _EngineCard._Part(self, "text")
 
 
 class _EngineWidget:
@@ -576,6 +655,21 @@ class Page:
 
     async def set_value(self, sel: str, value: str, index: int = 0) -> None:
         await self.dom("set_value", sel, value=value, index=index)
+
+    async def fill(self, values: dict[str, str]) -> dict[str, bool]:
+        """Set several fields at once: {"#user": "me", "#pw": "secret"}.
+
+        Returns {selector: whether it was found}, so a caller can log what a page
+        actually offered instead of assuming its shape.
+        """
+        out: dict[str, bool] = {}
+        for sel, value in values.items():
+            try:
+                await self.set_value(sel, value)
+                out[sel] = True
+            except PageError:
+                out[sel] = False
+        return out
 
     async def click(self, sel: str, index: int = 0) -> None:
         await self.dom("click", sel, index=index)

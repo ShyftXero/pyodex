@@ -39,6 +39,29 @@ OVERLAY_BODY = """<!-- Markup injected into the overlay <body>. Optional. -->
 """
 
 
+DEMOS = Path(__file__).parent / "demos"
+
+
+def available_demos() -> list[str]:
+    if not DEMOS.exists():
+        return []
+    return sorted(d.name for d in DEMOS.iterdir() if d.is_dir())
+
+
+def init_demo(target: Path, demo: str) -> None:
+    """Scaffold from a bundled demo (examples/demos, shipped inside the package)."""
+    import shutil
+
+    names = available_demos()
+    match = next((n for n in names if n == demo or n.startswith(demo + "-")), None)
+    if match is None:
+        raise SystemExit(f"unknown demo {demo!r}; available: {names}")
+    target.mkdir(parents=True, exist_ok=True)
+    for item in (DEMOS / match).iterdir():
+        if item.is_file():
+            shutil.copy2(item, target / item.name)
+
+
 def init_project(target: Path, name: str, matches: list[str] | None) -> None:
     target.mkdir(parents=True, exist_ok=True)
     matches = matches or ["<all_urls>"]

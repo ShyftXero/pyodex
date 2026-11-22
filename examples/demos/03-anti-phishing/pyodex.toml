@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 03 Anti-Phishing"
+version = ""
+description = "Scans the links on a page and flags lookalike domains."
+matches = ["<all_urls>"]
+boot = "user"
+http = false
