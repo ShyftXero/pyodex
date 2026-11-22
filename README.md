@@ -256,7 +256,7 @@ The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `butt
 |---|---|
 | `sha256_hex()` / `hmac_sha256_hex()` | works (MicroPython's hashlib has no `hexdigest()`, so it hexlifies the raw digest) |
 | `http_get()` / `http_post_json()` | works, via *synchronous* XHR — it blocks the tab, so it is for occasional small calls, not heavy traffic |
-| `socket()` | **refuses on purpose** with a message pointing at the Pyodide tier, which has real sockets through the proxy |
+| `Socket(host, port, bridge=...)` | TCP through the proxy's new **HTTP bridge** (`/tcp/HOST/PORT/open|send|recv|close`), verified with curl against a real echo server. Driving it from MicroPython's synchronous XHR is **unverified** — the interpreter dies mid-run, so the shim is present but not claimed working. The Pyodide tier remains the socket path |
 
 ### Compatibility sweeps, per tier
 
@@ -267,6 +267,15 @@ wheel's modules and see if it imports" — exactly what a developer would do:
 ```
 uv run pyodex compat mp --top 30 --write     # sweep, write src/pyodex/compat_mp.json
 uv run pyodex compat list --runtime micropython
+```
+
+The proxy now also speaks a small HTTP bridge for tiers without a WebSocket
+client (open/send/recv/close on port+1, same `--allow` rules and token):
+
+```
+curl -X POST http://127.0.0.1:1235/tcp/127.0.0.1/6379/open
+curl -X POST --data-binary 'PING' 'http://127.0.0.1:1235/tcp/127.0.0.1/6379/send?id=…'
+curl 'http://127.0.0.1:1235/tcp/127.0.0.1/6379/recv?id=…&timeout=3'
 ```
 
 The first 30 packages: **4 good** (`packaging`, `pygments`, `python-dateutil`,

@@ -29,6 +29,7 @@ import asyncio
 import fnmatch
 import ipaddress
 import logging
+import os
 import signal
 import ssl
 import sys
@@ -173,8 +174,122 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", help="require ?token=... on connect")
     p.add_argument("--connect-timeout", type=float, default=10.0)
     p.add_argument("--max-size", type=int, default=16 * 1024 * 1024, help="max WebSocket frame size")
+    p.add_argument("--http-offset", type=int, default=1,
+                   help="HTTP bridge runs on port+offset (0 = same port; default 1)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
+
+
+# --------------------------------------------------------------------------- #
+# HTTP bridge: for runtimes that have no WebSocket client (the MicroPython tier).
+# Same routing and allow rules as the WebSocket side; polling instead of duplex,
+# which is a latency trade, not a capability one.
+# --------------------------------------------------------------------------- #
+
+SESSIONS: dict[str, tuple[object, object]] = {}
+
+
+def _http_response(writer, status: int, body: bytes, ctype: str = "application/json") -> None:
+    head = (
+        f"HTTP/1.1 {status} OK\r\n"
+        f"Content-Type: {ctype}\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Headers: content-type\r\n"
+        "Cache-Control: no-store\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode()
+    writer.write(head + body)
+
+
+async def _http_client(reader, writer, proxy: "Proxy") -> None:
+    import base64
+    import json as _json
+
+    try:
+        line = await asyncio.wait_for(reader.readline(), 5)
+        if not line:
+            return
+        method, target, _ = line.decode(errors="replace").split(" ", 2)
+        headers: dict[str, str] = {}
+        while True:
+            h = await asyncio.wait_for(reader.readline(), 5)
+            if h in (b"\r\n", b"\n", b""):
+                break
+            k, _, v = h.decode(errors="replace").partition(":")
+            headers[k.strip().lower()] = v.strip()
+        length = int(headers.get("content-length") or 0)
+        body = await reader.readexactly(length) if length else b""
+
+        if method == "OPTIONS":
+            _http_response(writer, 204, b"")
+            return
+
+        parts = urlsplit(target)
+        segs = [x for x in parts.path.split("/") if x]
+        query = parse_qs(parts.query)
+        token = (query.get("token") or [None])[0]
+
+        if proxy.token and token != proxy.token:
+            _http_response(writer, 403, b'{"error":"bad token"}')
+            return
+
+        # /tcp/HOST/PORT/open | /send?id= | /recv?id=&timeout= | /close?id=
+        if len(segs) >= 4 and segs[0] == "tcp":
+            host, port, op = segs[1], int(segs[2]), segs[3]
+            if not proxy.allow.allows(host, port):
+                _http_response(writer, 403, b'{"error":"host not allowed"}')
+                return
+
+            if op == "open":
+                r, w = await asyncio.wait_for(asyncio.open_connection(host, port), proxy.connect_timeout)
+                sid = base64.urlsafe_b64encode(os.urandom(9)).decode()
+                SESSIONS[sid] = (r, w)
+                _http_response(writer, 200, _json.dumps({"id": sid}).encode())
+                return
+
+            sid = (query.get("id") or [""])[0]
+            sess = SESSIONS.get(sid)
+            if sess is None:
+                _http_response(writer, 404, b'{"error":"no session"}')
+                return
+            r, w = sess
+
+            if op == "send":
+                w.write(body)
+                await w.drain()
+                _http_response(writer, 200, b'{"sent":%d}' % len(body))
+                return
+
+            if op == "recv":
+                timeout = float((query.get("timeout") or ["5"])[0])
+                try:
+                    data = await asyncio.wait_for(r.read(65536), timeout)
+                except asyncio.TimeoutError:
+                    data = b""
+                except Exception:  # noqa: BLE001
+                    data = b""
+                payload = _json.dumps({"data": base64.b64encode(data).decode(), "eof": data == b""}).encode()
+                _http_response(writer, 200, payload)
+                return
+
+            if op == "close":
+                try:
+                    w.close()
+                finally:
+                    SESSIONS.pop(sid, None)
+                _http_response(writer, 200, b'{"closed":true}')
+                return
+
+        _http_response(writer, 404, b'{"error":"unknown path"}')
+    except Exception as e:  # noqa: BLE001
+        log.warning("http bridge error: %s", e)
+        try:
+            _http_response(writer, 500, b'{"error":"internal"}')
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        writer.close()
 
 
 async def amain(args: argparse.Namespace) -> int:
@@ -190,7 +305,11 @@ async def amain(args: argparse.Namespace) -> int:
             asyncio.get_running_loop().add_signal_handler(sig, lambda: not stop.done() and stop.set_result(None))
         except NotImplementedError:  # Windows
             pass
+    http_srv = await asyncio.start_server(
+        lambda r, w: _http_client(r, w, proxy), args.host, args.port + (args.http_offset or 0))
+
     async with serve(proxy.handle, args.host, args.port, max_size=args.max_size, ping_interval=20, ping_timeout=20):
+        log.info("http bridge on http://%s:%d (POST /tcp/HOST/PORT/open)", args.host, args.port + (args.http_offset or 0))
         log.info("listening ws://%s:%d  target=%s allow=%s token=%s", args.host, args.port,
                  f"{args.target[0]}:{args.target[1]}" if args.target else "-", args.allow or "-", "yes" if args.token else "no")
         await stop

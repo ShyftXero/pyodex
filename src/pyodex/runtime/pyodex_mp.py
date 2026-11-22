@@ -126,14 +126,79 @@ class SocketUnsupported(NotImplementedError):
     pass
 
 
-def socket(*args, **kwargs):
-    """Sockets are not available on this tier.
+def _xhr(method, url, body=None):
+    xhr = js.XMLHttpRequest.new()
+    xhr.open(method, url, False)
+    if body is not None:
+        xhr.send(body)
+    else:
+        xhr.send()
+    return xhr.responseText
 
-    MicroPython's wasm port has no socket API, and faking one would only move the
-    failure. Use the Pyodide tier (which routes through python_websocket_proxy) or
-    a native messaging host.
+
+class Socket:
+    """Real TCP, via the proxy's HTTP bridge.
+
+    This tier has no WebSocket client, so the transport is request/response: each
+    recv() is one long-poll. A latency trade, not a capability one — the proxy
+    opens a real TCP connection either way.
+
+        s = ui.Socket("127.0.0.1", 6379, bridge="http://127.0.0.1:1235")
+        s.connect(); s.send(b"PING\r\n"); print(s.recv())
     """
-    raise SocketUnsupported(
-        "MicroPython tier has no sockets; move this app to the Pyodide tier "
-        "(runtime = 'pyodide') "
-    )
+
+    def __init__(self, host, port, bridge="http://127.0.0.1:1235", token=None, timeout=5):
+        self.base = "%s/tcp/%s/%s" % (bridge.rstrip("/"), host, port)
+        self.token = token
+        self.timeout = timeout
+        self.id = None
+
+    def _url(self, tail):
+        sep = "&" if "?" in tail else "?"
+        return self.base + tail + (sep + "token=" + str(self.token) if self.token else "")
+
+    def connect(self):
+        import json
+
+        self.id = json.loads(_xhr("POST", self._url("/open")))["id"]
+        return self
+
+    def send(self, data):
+        if isinstance(data, str):
+            data = data.encode()
+        _xhr("POST", self._url("/send?id=" + self.id), bytes(data))
+        return len(data)
+
+    def sendall(self, data):
+        self.send(data)
+
+    def recv(self, timeout=None):
+        import binascii
+        import json
+
+        t = self.timeout if timeout is None else timeout
+        out = json.loads(_xhr("GET", self._url("/recv?id=%s&timeout=%s" % (self.id, t))))
+        return binascii.a2b_base64(out["data"])
+
+    def recv_until(self, sep=b"\n", limit=1 << 20):
+        buf = b""
+        while sep not in buf:
+            if len(buf) > limit:
+                raise ValueError("recv_until limit exceeded")
+            chunk = self.recv()
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
+    def close(self):
+        if self.id:
+            try:
+                _xhr("POST", self._url("/close?id=" + self.id))
+            finally:
+                self.id = None
+
+
+def socket(*args, **kwargs):
+    """Kept for symmetry: returns a Socket bound to the arguments given."""
+    return Socket(*args, **kwargs)

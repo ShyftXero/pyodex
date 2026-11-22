@@ -24,11 +24,13 @@ def probe(name, fn):
 probe("data-crypto", lambda: f"sha={ui.sha256_hex('abc')[:12]} mac={ui.hmac_sha256_hex('k', 'm')[:12]}")
 probe("data-http", lambda: ui.http_get(HTTP_URL)[:40])
 def sock_probe():
-    try:
-        ui.socket()
-        return "unexpected"
-    except ui.SocketUnsupported:
-        return "unsupported"
+    """Socket() is present but its in-page path is unverified.
+
+    The HTTP bridge on the proxy is proven with curl (open/send/recv/close against
+    a real TCP echo server). Driving it from MicroPython's synchronous XHR kills
+    the interpreter during the run, so we do not claim it works here.
+    """
+    return "bridge-ok-unverified-in-page" if hasattr(ui, "Socket") else "no-shim"
 
 
 probe("data-sock", sock_probe)

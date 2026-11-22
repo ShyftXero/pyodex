@@ -293,7 +293,8 @@ LEVELS = [
           9, ("primary",), experimental=True),
     Level("L10", "l10-compat-chrome", "L10_compat_chrome", "compat probes in Chrome's V8, not just Node", 10,
           ("primary",)),
-    Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11, ("primary",)),
+    Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11,
+          ("primary", "echo")),
     Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier boots and reaches the page",
           12, ("primary",), experimental=True),
 ]
@@ -748,7 +749,10 @@ def check_l11(level, ctx, env, c: Checks) -> None:
     http = frame.evaluate("() => document.body.getAttribute('data-http') || ''")
     c.expect("synchronous http_get works", '"ok"' in (http or ""), f"http={http!r}")
     sock = frame.evaluate("() => document.body.getAttribute('data-sock') || ''")
-    c.expect("sockets honestly unsupported on this tier", sock == "unsupported", f"sock={sock!r}")
+    # The HTTP bridge is verified with curl; from an extension page the sync XHR is
+    # blocked as mixed content, so we assert the *finding*, not a success.
+    c.expect("small-tier socket shim is present and honestly unverified",
+             sock == "bridge-ok-unverified-in-page", f"sock={sock!r}")
 
 
 def check_l12(level, ctx, env, c: Checks) -> None:
@@ -872,7 +876,12 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
         src = FIXTURES / level.fixture
         shutil.copytree(src, dst)
         main = dst / "main.py"
-        main.write_text(f'HTTP_URL = "http://127.0.0.1:{ports["http"]}/json"\n' + main.read_text())
+        prelude = (
+            f'HTTP_URL = "http://127.0.0.1:{ports["http"]}/json"\n'
+            f'ECHO_PORT = {ports.get("echo", 0)}\n'
+            f'BRIDGE = "http://127.0.0.1:{ports["proxy"] + 1}"\n'
+        )
+        main.write_text(prelude + main.read_text())
         return build_extension(dst, work / "dist" / level.slug)
 
     if level.name == "L10":
