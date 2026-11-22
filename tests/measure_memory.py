@@ -64,26 +64,37 @@ def rss_mb(profile: Path) -> float:
     return total
 
 
-def fixture(work: Path, engine: str) -> Path:
+def fixture(work: Path, engine: str, ui: str = "local") -> Path:
     from pyodex.builder import build_extension
 
     d = work / f"mem-{engine}"
     d.mkdir(parents=True)
     (d / "pyodex.toml").write_text(
-        f'[extension]\nname = "Mem {engine}"\nboot = "user"\nhttp = false\nengine = "{engine}"\n'
+        f'[extension]\nname = "Mem {engine}-{ui}"\nboot = "auto"\nhttp = false\n'
+        f'engine = "{engine}"\nui = "{ui}"\n'
     )
-    (d / "main.py").write_text(
-        "from pyodex_runtime import Overlay, status\n"
-        "ui = Overlay()\n"
-        "ui.button('mem', top=16, left=16, id='mem-btn')\n"
-        "status('mem ready')\n"
-    )
+    if ui == "engine":
+        (d / "main.py").write_text(
+            "from pyodex_runtime import Overlay, on_attach\n"
+            "ui = Overlay()\n"
+            "@on_attach\n"
+            "def attached(page, url):\n"
+            "    ui.button('mem', top=16, left=16, id='mem-btn')\n"
+        )
+    else:
+        (d / "main.py").write_text(
+            "from pyodex_runtime import Overlay, status\n"
+            "ui = Overlay()\n"
+            "ui.button('mem', top=16, left=16, id='mem-btn')\n"
+            "status('mem ready')\n"
+        )
     return build_extension(d, work / f"out-{engine}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", default="local", choices=["local", "shared"])
+    ap.add_argument("--ui", default="local", choices=["local", "engine"])
     ap.add_argument("--tabs", type=int, default=3)
     ap.add_argument("--out", help="write JSON results here")
     args = ap.parse_args()
@@ -94,7 +105,7 @@ def main() -> int:
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
-    built = fixture(work, args.engine)
+    built = fixture(work, args.engine, args.ui)
     profile = Path(tempfile.mkdtemp(prefix="mem-profile-"))
 
     rows: list[dict] = []
@@ -126,7 +137,7 @@ def main() -> int:
                         const host = document.getElementById('pyodex-mem-%s-launcher');
                         host && host.shadowRoot.querySelector('button').click();
                     }"""
-                    % args.engine
+                    % f"mem-{args.engine}-{args.ui}"
                 )
                 p.wait_for_timeout(4000)  # boot
                 sample(f"{i + 1} tab(s), overlay booted")
@@ -141,7 +152,7 @@ def main() -> int:
     booted = [r for r in rows if "overlay booted" in r["label"]]
     if len(booted) >= 2:
         per_tab = (booted[-1]["rss_mb"] - booted[0]["rss_mb"]) / (len(booted) - 1)
-        print(f"\nper-tab interpreter cost ({args.engine}): ~{per_tab:.0f} MB")
+        print(f"\nper-tab interpreter cost ({args.engine}/{args.ui}): ~{per_tab:.0f} MB")
         rows.append({"label": "per-tab interpreter cost", "rss_mb": round(per_tab, 1)})
 
     if args.out:
