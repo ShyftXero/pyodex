@@ -340,7 +340,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         cfg.version = chrome_version(_datever())
 
     resources: list[str] = ["overlay.html", "bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
-                            "pyodide/*", "app/*", "wheels/*"]
+                            "pyodide/*", "app/*", "wheels/*", "agent.html", "agent.js",
+                            "engine_worker.js", "engine.html", "engine.js"]
 
     plan_mp = None  # set when the micropython tier is chosen
     def _mp_build() -> None:
@@ -554,7 +555,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
             "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
         }))
-    if cfg.engine == "shared" or cfg.ui == "engine":
+    if cfg.ui == "engine":
+        # SharedWorker host: one interpreter for the browser, one tiny agent iframe
+        # per tab. No offscreen document (it is not even executed in our harness).
+        for name in ("engine_worker.js", "agent.html", "agent.js"):
+            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+    if cfg.engine == "shared":
         for name in ("engine.html", "engine.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
     if cfg.page_cache and cfg.page_cache_hosts:

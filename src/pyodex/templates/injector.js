@@ -491,6 +491,28 @@
     return false;
   });
 
+  // The agent iframe holds the SharedWorker connection; this page holds the DOM.
+  const agentId = "a" + String(Math.random()).slice(2, 10);
+  const agent = document.createElement("iframe");
+  agent.src = chrome.runtime.getURL("agent.html") + "?agent=" + encodeURIComponent(agentId) +
+              "&url=" + encodeURIComponent(location.href);
+  Object.assign(agent.style, { position: "fixed", width: "0", height: "0", border: "none",
+                               opacity: "0", pointerEvents: "none" });
+  document.documentElement.appendChild(agent);
+
+  window.addEventListener("message", (ev) => {
+    if (ev.source !== agent.contentWindow) return;
+    const msg = ev.data;
+    if (!msg || msg.pyodex !== true || msg.kind !== "agent-dom") return;
+    let reply;
+    try {
+      reply = { ok: true, payload: runDomOp({ ...(msg.args || {}), op: msg.op }) };
+    } catch (e) {
+      reply = { ok: false, error: String(e && e.message) };
+    }
+    agent.contentWindow.postMessage({ pyodex: true, kind: "agent-dom-reply", id: msg.id, reply }, "*");
+  });
+
   // Announce this tab so the engine can address it. The reply is kept on window
   // so failures are diagnosable from DevTools (and by the test harness).
   // Retry on BOTH failure shapes: a rejected send (worker still waking) and an
