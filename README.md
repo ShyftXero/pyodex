@@ -207,6 +207,42 @@ On build, `pyodex`:
 Packages Pyodide ships itself (numpy, pandas, cryptography, ...) are pinned to
 Pyodide's own build via uv constraints and fetched from the Pyodide CDN.
 
+## The Python surface
+
+Everything an app needs comes from one module — you never import `pyodide`,
+`pyodide.ffi`, or `chrome.*` directly.
+
+**DOM on the overlay** (`Overlay`): `card()`, `badge()`, `input()`, `button()`,
+`panel()`, `layer()`.
+
+**The host page, async** (`Page`): `query()`, `text()`, `html()`, `attr()`,
+`count()`, `set_value()`, `set_text()`, `set_html()`, `click()`, `scroll_to()`,
+`fill({selector: value})`, `info()`, `subscribe()`.
+
+**Declaring intent**: `@on_load`, `@watch_for(sel)`, `@on_event(events.X)`,
+`@urlmatch([...])`, `@on_attach` (engine mode), `events`.
+
+**Extension APIs**: `storage_get/set()`, `tabs_query()`, `runtime_url()`,
+`set_badge()`, `shared_run()`, `shared_status()`.
+
+**Lifecycle & dev**: `keep_alive()`, `release()`, `want_boot()`, `status()`,
+`save()`, `engine_mode()`, `pip_install()`.
+
+**Networking**: `fetch_json()`, `fetch_text()`, `WebSocketClient`, `TcpSocket`,
+`WebTransport`.
+
+**Interop**: `js` (the JS globals), `create_proxy`, `to_js`, `jsnull`, `jsobj()`,
+`vendored(name)`.
+
+So a demo reads like Python:
+
+```python
+from pyodex_runtime import Overlay, Page, on, storage_set, urlmatch, watch_for
+
+ui, page = Overlay(), Page()
+ui.card("Hi").body.innerText = await page.text("h1")
+```
+
 ## Demos
 
 Five extensions, all pure Python, escalating from "does the loop work" to the

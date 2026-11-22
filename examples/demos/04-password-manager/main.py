@@ -18,11 +18,9 @@ authenticated encryption (AES-GCM with a per-entry nonce), and a lock policy.
 import asyncio
 import json
 
-from pyodide.ffi import create_proxy, to_js
-from pyodex_runtime import (Overlay, Page, keep_alive, on, status, storage_get,
-                            storage_set, urlmatch, watch_for)
 import pyodex_natural as nat
-import js
+from pyodex_runtime import (Overlay, Page, create_proxy, js, keep_alive, on, status,
+                            storage_get, storage_set, to_js, urlmatch, watch_for)
 
 VAULT = "demo04_vault"
 VAULT_FILE = f"{nat.config.data_dir}/demo04-vault.json"

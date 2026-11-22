@@ -22,6 +22,19 @@ def _maybe(name):
         return None
 
 
+# Re-exported so app code never has to know the runtime underneath. Reaching for
+# `pyodide.ffi` from a demo is a framework leak, not an app concern.
+try:
+    from pyodide.ffi import create_proxy, jsnull, to_js  # noqa: F401
+except ImportError:  # pragma: no cover - non-Pyodide tiers
+    def create_proxy(fn):  # type: ignore[misc]
+        return fn
+
+    def to_js(value, **kw):  # type: ignore[misc]
+        return value
+
+    jsnull = None
+
 document = _maybe("document")
 window = _maybe("window")
 
