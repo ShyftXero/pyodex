@@ -73,6 +73,21 @@ Next move: wrap the attach handler body in try/catch that persists the thrown er
 to storage, then read it. A handler that throws synchronously returns no response and
 looks exactly like this from the outside.
 
+## Latest finding: attach is not delivered, though tab ops are
+
+In the same build and the same content script: `chrome.tabs.sendMessage` from the
+worker *reaches* the page agent (`{"ok":true,"payload":2}`), while the agent's own
+`chrome.runtime.sendMessage({kind:"pyodex-attach"})` never arrives at the worker
+(a storage marker at the top of the handler is never written, after 20 s and 10
+retries). Messaging works in every other direction we have tested, including
+content-script → worker for the blob cache, so this is not a general routing
+failure — it is specific to this handler.
+
+Next step is the same trick that cracked the offscreen hop: a three-file
+extension where a content script sends one message and the worker writes a storage
+marker, with no pyodex in the way. If that works, bisect the difference (module vs
+classic worker, listener count, eager `ensureEngine()` at module top).
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
