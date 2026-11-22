@@ -215,6 +215,7 @@ each one is a **capability** claim, not just a size, so selection is mechanical:
 | Tier | ~Size | Capabilities | Status |
 |---|---|---|---|
 | `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
+| `brython` | 2 MB | DOM, subset of stdlib, no wasm at all | vendored, **does not reach main.py yet** |
 | `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | vendored, **does not boot yet** (see below) |
 | `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
 

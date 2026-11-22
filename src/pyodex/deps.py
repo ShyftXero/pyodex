@@ -125,6 +125,30 @@ def ensure_rustpython(force: bool = False) -> Path:
     return target
 
 
+BRYTHON_NPM = "https://cdn.jsdelivr.net/npm/brython@3.12.4"
+BRYTHON_FILES = ("brython.min.js",)
+
+
+def ensure_brython(force: bool = False) -> Path:
+    """Fetch Brython (Python implemented in JS) into the cache.
+
+    Not wasm, so it needs no glue module and no ESM-integration flag — which is
+    exactly why it is the tier that actually boots today.
+    """
+    target = cache_dir() / "brython-3.12.4"
+    marker = target / ".complete"
+    if marker.exists() and not force:
+        return target
+    target.mkdir(parents=True, exist_ok=True)
+    for name in BRYTHON_FILES:
+        dest = target / name
+        if not dest.exists() or force:
+            print(f"downloading {BRYTHON_NPM}/{name}")
+            _download(f"{BRYTHON_NPM}/{name}", dest)
+    marker.write_text(BRYTHON_NPM)
+    return target
+
+
 def ensure_url_asset(url: str, filename: str, force: bool = False) -> Path:
     """Download an arbitrary URL (e.g. a UMD bundle) into the cache, keyed by URL hash."""
     key = hashlib.sha256(url.encode()).hexdigest()[:16]

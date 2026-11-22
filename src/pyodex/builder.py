@@ -443,6 +443,65 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
         print(f"built {runtime} tier ({cfg.slug})")
 
+    if cfg.runtime == "brython":
+        _plan_runtime(cfg, [], project)
+        from .deps import ensure_brython
+
+        src = ensure_brython()
+        (out / "brython").mkdir()
+        shutil.copy2(src / "brython.min.js", out / "brython" / "brython.min.js")
+        shutil.copy2(RUNTIME / "pyodex_br.py", out / "pyodex_br.py")
+        (out / "bootstrap.js").write_text(_render((TEMPLATES / "br_bootstrap.js").read_text(), {"NAME": cfg.name}))
+        app = out / "app"
+        app.mkdir()
+        _copy(project / cfg.entry, app / "main.py")
+        # Brython compiles <script type="text/python"> at DOMContentLoaded, so the
+        # shim and the app are concatenated into one file the document can point at.
+        (app / "combined.py").write_text(
+            (RUNTIME / "pyodex_br.py").read_text() + "\n" + (project / cfg.entry).read_text())
+        (app / "files.json").write_text(json.dumps(["main.py", "combined.py"]))
+        body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
+                                    if (project / "overlay.body.html").exists() else "")
+        css = cfg.overlay_css or ((project / "overlay.css").read_text()
+                                  if (project / "overlay.css").exists() else "")
+        (out / "overlay.html").write_text(
+            "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>" + cfg.name + "</title>"
+            "<style>html,body{margin:0;height:100%;background:transparent;pointer-events:none}"
+            "#pyodex-status{position:fixed;bottom:8px;right:8px;z-index:2147483647;font:11px system-ui;"
+            "color:#fff;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}"
+            "#pyodex-status.hidden{display:none}button{pointer-events:auto}</style>"
+            "<script src='brython/brython.min.js'></script></head><body>"
+            + body +
+            "<div id='pyodex-status'>Loading Brython…</div>"
+            "<script type='text/python' src='app/combined.py'></script>"
+            "</body></html>\n")
+        (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
+            "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
+            "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
+            "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
+            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
+        }))
+        resources = ["overlay.html", "pyodex_br.py", "app/*", "brython/*"]
+        # Same trap as the other tiers: the manifest references these whenever page
+        # caching is on, and a missing file makes Chrome reject the extension.
+        if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
+            (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
+                "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
+                "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
+            }))
+            (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
+            (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
+                                                     {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
+            resources += ["bg.js", "pagebridge.js", "pagemain.js"]
+        if cfg.cache:
+            for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
+                (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+            resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
+        print(f"built brython tier ({cfg.slug})")
+        return out
+
     if cfg.runtime == "rustpython":
         _plan_runtime(cfg, [], project)
         _tier_build("rustpython", "rustpython", ("rustpython_wasm.js", "rustpython_wasm_bg.wasm"),

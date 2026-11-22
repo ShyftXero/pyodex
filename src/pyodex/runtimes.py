@@ -66,6 +66,15 @@ RUNTIMES: dict[str, Runtime] = {
         implemented=True,
         notes="middle ground: wider stdlib than MicroPython, no CPython fidelity",
     ),
+    "brython": Runtime(
+        name="brython",
+        approx_mb=2,
+        capabilities=frozenset({DOM, CRYPTO}),
+        cdn_patterns=(r"/brython(@[^/]+)?/brython(?:_stdlib)?(\.min)?\.js$",),
+        loader="brython/brython.min.js",
+        implemented=True,
+        notes="Python implemented in JS; real DOM, no wasm, subset of stdlib",
+    ),
     "pyodide": Runtime(
         name="pyodide",
         approx_mb=55,
@@ -80,7 +89,7 @@ RUNTIMES: dict[str, Runtime] = {
     ),
 }
 
-DEFAULT_ORDER: tuple[str, ...] = ("micropython", "rustpython", "pyodide")
+DEFAULT_ORDER: tuple[str, ...] = ("micropython", "brython", "rustpython", "pyodide")
 
 
 def order(names: list[str] | None) -> list[Runtime]:
