@@ -127,6 +127,18 @@ own DevTools target and we cannot read its console from the harness. Next step i
 manual — `chrome://extensions` → inspect the offscreen document → read the error —
 then fix whatever it reports.
 
+### Follow-up: not module loading
+
+Switching `engine.html` to a classic `<script src>` (engine.js has no imports) made
+no difference: a first-statement storage write still never happens, while
+`hasDocument()` is true. So the document exists but nothing executes in it,
+independent of script type. Remaining candidates, in order: the document is created
+against a stale/blank URL, the document is being torn down immediately after
+creation, or an offscreen-specific policy is blocking script execution.
+
+All three need the offscreen target's own console
+(`chrome://extensions` → inspect), which the Playwright harness cannot read.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
