@@ -1,0 +1,6 @@
+[extension]
+name = "L12 RustPython"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+runtime = "rustpython"

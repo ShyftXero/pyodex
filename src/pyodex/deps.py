@@ -105,6 +105,26 @@ def ensure_micropython(force: bool = False) -> Path:
     return target
 
 
+RUSTPYTHON_NPM = "https://cdn.jsdelivr.net/npm/rustpython_wasm@0.1.0-pre-alpha.2"
+RUSTPYTHON_FILES = ("rustpython_wasm.js", "rustpython_wasm_bg.wasm")
+
+
+def ensure_rustpython(force: bool = False) -> Path:
+    """Fetch the prebuilt RustPython wasm distribution into the cache."""
+    target = cache_dir() / "rustpython-0.1.0-pre-alpha.2"
+    marker = target / ".complete"
+    if marker.exists() and not force:
+        return target
+    target.mkdir(parents=True, exist_ok=True)
+    for name in RUSTPYTHON_FILES:
+        dest = target / name
+        if not dest.exists() or force:
+            print(f"downloading {RUSTPYTHON_NPM}/{name}")
+            _download(f"{RUSTPYTHON_NPM}/{name}", dest)
+    marker.write_text(RUSTPYTHON_NPM)
+    return target
+
+
 def ensure_url_asset(url: str, filename: str, force: bool = False) -> Path:
     """Download an arbitrary URL (e.g. a UMD bundle) into the cache, keyed by URL hash."""
     key = hashlib.sha256(url.encode()).hexdigest()[:16]

@@ -215,7 +215,7 @@ each one is a **capability** claim, not just a size, so selection is mechanical:
 | Tier | ~Size | Capabilities | Status |
 |---|---|---|---|
 | `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
-| `rustpython` | 5 MB | DOM, wider stdlib than MicroPython, no CPython fidelity | declared, not implemented |
+| `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | vendored, **does not boot yet** (see below) |
 | `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
 
 ```toml
@@ -241,6 +241,13 @@ loader) plus a bootstrap; nothing else in the build knows tier names. The blob
 cache is runtime-agnostic too: `cache_patterns()` covers MicroPython and RustPython
 URLs even though we ship neither, so other pages running those runtimes are served
 from our cache when a digest is pinned.
+
+`rustpython_wasm@0.1.0-pre-alpha.2` is vendored and wired (build + bootstrap +
+`pyodex_rp.py` reaching the page through `js_vars`), but it cannot boot: its ESM
+entry imports `./rustpython_wasm_bg`, and the npm package ships only
+`rustpython_wasm_bg.wasm` — the glue module is expected to be produced by a
+bundler. Making this tier work needs either a build step that emits that file or a
+newer upstream artifact. Harness L12 exists and is marked experimental.
 
 The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `button()`,
 `count()`, `text_of()`, `on()`, plus small-tier shims in `pyodex_mp`:

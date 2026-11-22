@@ -62,8 +62,8 @@ RUNTIMES: dict[str, Runtime] = {
             r"/rustpython.*\.(?:wasm|js)$",
             r"/rustpython/.*/rustpython\.wasm$",
         ),
-        loader="",
-        implemented=False,
+        loader="rustpython/rustpython_wasm.js",
+        implemented=True,
         notes="middle ground: wider stdlib than MicroPython, no CPython fidelity",
     ),
     "pyodide": Runtime(
