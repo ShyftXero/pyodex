@@ -895,9 +895,20 @@ def check_l17(level, ctx, env, c: Checks) -> None:
     frame.fill("#vault-user", "demo@example.com")
     frame.fill("#vault-pass", "s3cret-value")
     frame.click("#save-btn")
-    c.expect("save acknowledged",
-             bool(wait_for(lambda: "saved for demo@example.com" in frame_text(frame), 60)),
-             f"text={frame_text(frame)[:160]!r}")
+    saved_text = wait_for(lambda: "saved for demo@example.com" in frame_text(frame) and frame_text(frame), 60)
+    c.expect("save acknowledged", bool(saved_text), f"text={frame_text(frame)[:160]!r}")
+    # the demo's whole point: what is stored is the reversed string, not crypto
+    c.expect("stores the password reversed", "eulav-terc3s" in (saved_text or ""),
+             f"text={(saved_text or '')[:200]!r}")
+    c.expect("says it is not encrypted", "not encrypted" in (saved_text or ""),
+             f"text={(saved_text or '')[:200]!r}")
+    c.expect("persisted to both file and IndexedDB",
+             "file + IndexedDB" in (saved_text or ""), f"text={(saved_text or '')[:200]!r}")
+    # Both sinks report success; IndexedDB used to be False because its callback
+    # was read synchronously.
+    c.expect("file write reported ok", "file=True" in (saved_text or ""), f"text={(saved_text or '')[:200]!r}")
+    c.expect("IndexedDB write reported ok", "indexeddb=True" in (saved_text or ""),
+             f"text={(saved_text or '')[:220]!r}")
 
     page.reload()
     f2 = overlay_frame(page, 60000)

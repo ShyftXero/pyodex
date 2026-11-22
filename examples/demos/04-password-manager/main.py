@@ -1,43 +1,115 @@
 """Demo 04 — DIY password manager (teaching demo).
 
-What it shows: per-site credential storage, an interactive form rendered from
-Python, and autofill through the page bridge.
+What it shows: credentials persisted in TWO places — an IndexedDB object store and
+a JSON file on the persistent (IndexedDB-backed) disk — and autofill through the
+page bridge.
 
-pyodex features: @urlmatch + @watch_for, Overlay.card + Overlay.input, Page.fill
-(mapping of selector → value), storage_get / storage_set, keep_alive.
+pyodex features: @urlmatch + @watch_for, Overlay.card + Overlay.input,
+Page.fill(mapping), the persistent data dir (`pyodex_natural.config.data_dir`) with
+save(), and raw IndexedDB access from Python via the `js` bridge.
 
-READ THIS BEFORE REUSING IT: this demo stores credentials in
-chrome.storage.local **in plaintext** and has no master password. It exists to show
-the mechanics — real use needs a KDF (Argon2/scrypt), authenticated encryption
-(AES-GCM with a per-entry nonce), and a lock policy. The fingerprint shown in the
-UI is only a checksum so you can see that a secret was stored, not protection.
+READ THIS BEFORE REUSING IT: the "encryption" here is `secret[::-1]` and nothing
+else. Reversing a string is not cryptography — it is there to make the point that
+everything below is plain Python, and that a demo which hides the storage format
+would be lying about what it protects. Real use needs a KDF (Argon2/scrypt),
+authenticated encryption (AES-GCM with a per-entry nonce), and a lock policy.
 """
 
 import asyncio
 import json
 
+from pyodide.ffi import create_proxy, to_js
 from pyodex_runtime import (Overlay, Page, keep_alive, on, status, storage_get,
                             storage_set, urlmatch, watch_for)
+import pyodex_natural as nat
+import js
 
 VAULT = "demo04_vault"
+VAULT_FILE = f"{nat.config.data_dir}/demo04-vault.json"
+IDB_NAME = "demo04-vault"
+IDB_STORE = "entries"
+
 ui = Overlay()
 page = Page()
 
 
-def fingerprint(secret: str) -> str:
-    """Cheap checksum so the UI can show 'something is stored'. NOT security."""
-    return "".join(f"{(sum(map(ord, secret)) * (i + 7)) % 16:x}" for i in range(4))
+def scramble(secret: str) -> str:
+    """The 'encryption'. It is a string reversal, i.e. not encryption at all."""
+    return secret[::-1]
 
 
-async def vault() -> dict:
-    raw = await storage_get(VAULT)
-    return json.loads(raw) if isinstance(raw, str) and raw else (raw or {})
+def unscramble(stored: str) -> str:
+    return stored[::-1]
 
 
-async def save(site: str, user: str, secret: str) -> None:
-    data = await vault()
-    data[site] = {"user": user, "secret": secret, "fp": fingerprint(secret)}
-    await storage_set(VAULT, json.dumps(data))
+# --------------------------------------------------------------------------- #
+# persistence: a JSON file on the persistent disk
+# --------------------------------------------------------------------------- #
+
+
+def write_file(data: dict) -> bool:
+    try:
+        with open(VAULT_FILE, "w") as f:
+            json.dump(data, f)
+        nat.save()  # flush the persistent dir to IndexedDB
+        return True
+    except OSError:
+        return False
+
+
+def read_file() -> dict:
+    try:
+        with open(VAULT_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+# --------------------------------------------------------------------------- #
+# persistence: an IndexedDB object store, driven from Python
+# --------------------------------------------------------------------------- #
+
+
+async def idb_put(site: str, entry: dict) -> bool:
+    """Write one entry into IndexedDB.
+
+    The callback fires after this call returns, so the result is awaited rather
+    than read synchronously — the first version returned False every time.
+    """
+    fut = asyncio.get_event_loop().create_future()
+
+    def on_upgrade(event):
+        db = event.target.result
+        if IDB_STORE not in db.objectStoreNames:
+            db.createObjectStore(IDB_STORE)
+
+    def on_success(event):
+        db = event.target.result
+        try:
+            tx = db.transaction(IDB_STORE, "readwrite")
+            tx.objectStore(IDB_STORE).put(to_js(entry), site)
+            if not fut.done():
+                fut.set_result(True)
+        except Exception:  # noqa: BLE001
+            if not fut.done():
+                fut.set_result(False)
+        finally:
+            db.close()
+
+    def on_error(_event):
+        if not fut.done():
+            fut.set_result(False)
+
+    req = js.indexedDB.open(IDB_NAME, 1)
+    req.onupgradeneeded = create_proxy(on_upgrade)
+    req.onsuccess = create_proxy(on_success)
+    req.onerror = create_proxy(on_error)
+    return await asyncio.wait_for(fut, 5)
+
+
+# --------------------------------------------------------------------------- #
+# UI
+# --------------------------------------------------------------------------- #
 
 
 @urlmatch(["http://*", "https://*"])
@@ -47,15 +119,38 @@ def login_form():
     asyncio.ensure_future(ui_for_this_site())
 
 
+async def entries() -> dict:
+    """File is the source of truth; storage is the legacy fallback."""
+    data = read_file()
+    if data:
+        return data
+    raw = await storage_get(VAULT)
+    return json.loads(raw) if isinstance(raw, str) and raw else (raw or {})
+
+
+async def save(site: str, user: str, secret: str) -> dict:
+    stored = scramble(secret)
+    data = await entries()
+    data[site] = {"user": user, "stored": stored}
+    wrote_file = write_file(data)
+    wrote_idb = await idb_put(site, {"user": user, "stored": stored})
+    await storage_set(VAULT, json.dumps(data))
+    return {"file": wrote_file, "indexeddb": wrote_idb, "stored": stored}
+
+
 async def ui_for_this_site() -> None:
     info = await page.info()
     site = info["url"].split("?")[0].rsplit("/", 1)[0]
-    data = await vault()
+    data = await entries()
     saved = data.get(site)
 
     card = ui.card(f"Demo 04 — {site.split('//')[-1][:40]}")
     if saved:
-        card.body.innerText = f"saved for {saved['user']} (fp {saved['fp']})"
+        card.body.innerText = (
+            f"saved for {saved['user']}\n"
+            f"stored (reversed, not encrypted): {saved['stored']}\n"
+            "persisted to: file + IndexedDB"
+        )
         btn = ui.button("Fill", top=16, right=16, id="fill-btn")
 
         @on(btn, "click")
@@ -76,20 +171,20 @@ async def ui_for_this_site() -> None:
 
 
 async def do_save(site: str, user_in, pass_in) -> None:
-    await save(site, user_in.value or "user", pass_in.value or "")
+    res = await save(site, user_in.value or "user", pass_in.value or "")
     await ui_for_this_site()
-    status("credential saved locally (teaching demo: plaintext)")
+    status(f"saved: file={res['file']} indexeddb={res['indexeddb']} (reversed, not encrypted)")
 
 
 async def do_fill(site: str) -> None:
-    data = await vault()
+    data = await entries()
     entry = data.get(site)
     if not entry:
         return
-    filled = await page.fill({"input[type=password]": entry["secret"]})
-    # fill the username field too, whatever it is called on this page
+    secret = unscramble(entry["stored"])
+    await page.fill({"input[type=password]": secret})
     for sel in ("input[name=user]", "input[type=email]", "input[name=username]", "input[id=user]"):
         if await page.count(sel):
             await page.fill({sel: entry["user"]})
             break
-    status(f"filled {sum(filled.values())} field(s)")
+    status("filled from the reversed store")
