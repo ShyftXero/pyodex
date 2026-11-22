@@ -253,15 +253,25 @@ after load — so there is nothing for us to call, and its own auto-run never
 compiles our script. Next step would be shipping `brython_stdlib.js` (4.4 MB) or
 finding the documented bootstrap for this build. L13 is experimental.
 
-`rustpython_wasm@0.1.0-pre-alpha.2` is vendored and wired (build + bootstrap +
-`pyodex_rp.py` reaching the page through `js_vars`), but it cannot boot. Cause,
-confirmed against the package file list (`unpkg ?meta`): the ESM entry does
-`import * as wasm from "./rustpython_wasm_bg"` and the package ships only
-`rustpython_wasm_bg.wasm` — it expects **WebAssembly ESM integration** (importing a
-`.wasm` as a module), which Chrome gates behind a flag. So this artifact needs
-either a bundling step that emits the glue, an artifact built with wasm-bindgen's
-`--target bundler` plus a bundler, or a future release. Harness L12 exists and is
-marked experimental; the sweep for this tier is blocked on the same thing.
+`rustpython_wasm@0.1.0-pre-alpha.2` now **boots**: the missing glue was solved by
+patching the vendored ESM to accept an instance (`__pyodex_setWasm`) and
+instantiating the wasm ourselves — its 80 imports come from that same module
+(`./rustpython_wasm`), so the cycle closes once both sides exist.
+
+It still cannot *run Python* in an extension page, and the reason is a platform
+limit, not a bug: the generated glue calls `eval` (wasm-bindgen/Emscripten
+"asm consts"), and MV3 extension pages cannot enable `unsafe-eval` — the CSP is
+fixed by the platform. Two ways forward, both real work:
+
+1. **Sandboxed page**: MV3 allows a manifest `sandbox` page with a relaxed CSP
+   (eval permitted, no `chrome.*` APIs). RustPython would live there and talk to
+   the extension over `postMessage`. That is the sanctioned place for eval-needing
+   runtimes.
+2. **A build without eval**: recompile with wasm-bindgen options that avoid
+   `Function`/`eval`, if such a target exists.
+
+So the third tier is proven feasible at the wasm level and blocked at the CSP
+level. L12 stays experimental; its sweep is blocked on the same thing.
 
 The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `button()`,
 `count()`, `text_of()`, `on()`, plus small-tier shims in `pyodex_mp`:

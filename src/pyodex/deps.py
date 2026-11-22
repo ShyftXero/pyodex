@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tarfile
 import tempfile
 import urllib.request
@@ -121,8 +122,30 @@ def ensure_rustpython(force: bool = False) -> Path:
         if not dest.exists() or force:
             print(f"downloading {RUSTPYTHON_NPM}/{name}")
             _download(f"{RUSTPYTHON_NPM}/{name}", dest)
+    _patch_rustpython_esm(target / "rustpython_wasm.js")
     marker.write_text(RUSTPYTHON_NPM)
     return target
+
+
+def _patch_rustpython_esm(path: Path) -> None:
+    """Make the vendored ESM accept an instance instead of importing one.
+
+    The package ships `rustpython_wasm.js` but no `rustpython_wasm_bg.js`: it
+    expects WebAssembly ESM integration (importing a .wasm as a module), which
+    Chrome gates behind a flag. The wasm's own imports come from the ESM
+    (`./rustpython_wasm`), so the cycle closes by passing the instance in after
+    both sides exist.
+    """
+    src = path.read_text()
+    if "__pyodex_setWasm" in src:
+        return
+    src, n1 = re.subn(r"import \* as wasm from './rustpython_wasm_bg';",
+                      "let wasm = {};\nexport function __pyodex_setWasm(w) { wasm = w; }", src)
+    src, n2 = re.subn(r"^wasm\.__wbindgen_start\(\);", "export function __pyodex_start() { wasm.__wbindgen_start(); }",
+                      src, flags=re.M)
+    if n1 != 1 or n2 != 1:
+        raise RuntimeError(f"rustpython ESM patch did not apply (import={n1}, start={n2})")
+    path.write_text(src)
 
 
 BRYTHON_NPM = "https://cdn.jsdelivr.net/npm/brython@3.12.4"

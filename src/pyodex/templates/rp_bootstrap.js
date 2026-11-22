@@ -3,7 +3,26 @@
 // Between MicroPython and Pyodide: a wider stdlib than MicroPython, no CPython
 // fidelity, and no DOM bridge of its own — JS values are handed in explicitly
 // through `vars`, which is what pyodex_rp uses to reach the overlay.
-import init, { pyEval } from "./rustpython/rustpython_wasm.js";
+import * as rp from "./rustpython/rustpython_wasm.js";
+
+// The package has no glue module (it expects wasm ESM integration), and the wasm
+// imports its helpers from this very module — so we instantiate it here and hand
+// the instance back.
+async function bootWasm() {
+  const bytes = await (await fetch(chrome.runtime.getURL("rustpython/rustpython_wasm_bg.wasm"))).arrayBuffer();
+  const mod = await WebAssembly.compile(bytes);
+  const imports = {};
+  for (const imp of WebAssembly.Module.imports(mod)) {
+    imports[imp.module] = imports[imp.module] || {};
+    const fn = rp[imp.name];
+    if (typeof fn !== "function") throw new Error(`missing wasm import ${imp.name}`);
+    imports[imp.module][imp.name] = fn;
+  }
+  // With a pre-compiled Module this resolves to an Instance, not {instance}.
+  const instance = await WebAssembly.instantiate(mod, imports);
+  rp.__pyodex_setWasm(instance.exports);
+  rp.__pyodex_start();
+}
 
 const status = document.getElementById("pyodex-status");
 const errPanel = document.getElementById("pyodex-error");
@@ -31,7 +50,7 @@ async function text(rel) {
 
 async function boot() {
   setStatus("Loading RustPython…");
-  await init(chrome.runtime.getURL("rustpython/rustpython_wasm_bg.wasm"));
+  await bootWasm();
   window.pyodexCaps = { runtime: "rustpython", dom: false, packages: false, jspi: false };
 
   const vars = {
@@ -51,8 +70,8 @@ async function boot() {
   };
 
   setStatus("Running main.py…");
-  pyEval(await text("pyodex_rp.py"), { vars });
-  pyEval(await text("app/main.py"), { vars, stdout: (line) => console.log("[rp]", line) });
+  rp.pyEval(await text("pyodex_rp.py"), { vars });
+  rp.pyEval(await text("app/main.py"), { vars, stdout: (line) => console.log("[rp]", line) });
   status?.classList.add("hidden");
 }
 
