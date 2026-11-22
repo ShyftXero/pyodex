@@ -297,8 +297,7 @@ LEVELS = [
           ("primary", "echo")),
     Level("L13", "l13-brython", "L13_brython", "Brython tier boots and paints (third tier)",
           13, ("primary",), experimental=True),
-    Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier boots and reaches the page",
-          12, ("primary",), experimental=True),
+    Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier in a sandbox page", 12, ("primary",)),
 ]
 
 
@@ -761,8 +760,20 @@ def check_l12(level, ctx, env, c: Checks) -> None:
     """The RustPython tier: ~5 MB, wider stdlib, no DOM bridge of its own."""
     page = ctx.new_page()
     page.goto(f"{env['base']}/login.html")
-    frame = overlay_frame(page, 90000)
-    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+
+    def find(deadline=90000):
+        import time as _t
+
+        end = _t.time() + deadline / 1000
+        while _t.time() < end:
+            for f in page.frames:
+                if any(k in (f.url or "") for k in ("sandbox.html", "overlay.html")):
+                    return f
+            page.wait_for_timeout(200)
+        return None
+
+    frame = find()
+    if not c.expect("overlay booted", frame is not None, "no overlay/sandbox frame"):
         return
     caps = wait_for(lambda: frame.evaluate("() => window.pyodexCaps || null"), 90)
     c.expect("runtime is rustpython", bool(caps and caps.get("runtime") == "rustpython"),

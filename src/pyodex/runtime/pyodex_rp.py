@@ -13,7 +13,8 @@ def status(text):
 
 
 def count(selector):
-    return js_vars["query_count"](selector)
+    # js_vars hands back a JS value proxy; cast so arithmetic/formatting works.
+    return int(js_vars["query_count"](selector))
 
 
 def text_of(selector):

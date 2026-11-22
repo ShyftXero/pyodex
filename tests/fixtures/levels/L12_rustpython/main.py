@@ -1,7 +1,10 @@
-"""L12 — the RustPython tier (~5 MB): wider stdlib than MicroPython, no DOM bridge."""
+"""L12 — the RustPython tier (~5 MB), run in an MV3 sandbox page.
 
-import pyodex_rp as ui
+The sandbox is required: RustPython's wasm glue calls eval, and extension pages
+cannot allow unsafe-eval. The shim is concatenated ahead of this file, so its names
+are already in scope.
+"""
 
-ui.status("rp booted")
-ui.set_attr("body", "data-rp", f"inputs={ui.count('input')}")
+status("rp booted")
+set_attr("body", "data-rp", "inputs=" + str(count("input")))
 print("rp stdout works")

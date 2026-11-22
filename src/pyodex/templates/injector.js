@@ -193,7 +193,7 @@
   function boot() {
     iframe = document.createElement("iframe");
     iframe.id = FRAME_ID;
-    iframe.src = chrome.runtime.getURL("overlay.html");
+    iframe.src = chrome.runtime.getURL("{{OVERLAY_PAGE}}");
     iframe.setAttribute("allowtransparency", "true");
 
     Object.assign(iframe.style, {

@@ -216,7 +216,7 @@ each one is a **capability** claim, not just a size, so selection is mechanical:
 |---|---|---|---|
 | `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
 | `brython` | 1.1 MB | DOM, no wasm at all | vendored, **does not reach main.py yet** (see below) |
-| `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | vendored, **does not boot yet** (see below) |
+| `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | **implemented** — runs in an MV3 sandbox page (its glue needs `eval`) |
 | `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
 
 ```toml
@@ -253,25 +253,23 @@ after load — so there is nothing for us to call, and its own auto-run never
 compiles our script. Next step would be shipping `brython_stdlib.js` (4.4 MB) or
 finding the documented bootstrap for this build. L13 is experimental.
 
-`rustpython_wasm@0.1.0-pre-alpha.2` now **boots**: the missing glue was solved by
-patching the vendored ESM to accept an instance (`__pyodex_setWasm`) and
-instantiating the wasm ourselves — its 80 imports come from that same module
-(`./rustpython_wasm`), so the cycle closes once both sides exist.
+**RustPython works, in a sandbox page.** Two obstacles, both solved:
 
-It still cannot *run Python* in an extension page, and the reason is a platform
-limit, not a bug: the generated glue calls `eval` (wasm-bindgen/Emscripten
-"asm consts"), and MV3 extension pages cannot enable `unsafe-eval` — the CSP is
-fixed by the platform. Two ways forward, both real work:
+1. *No glue module.* The package ships `rustpython_wasm.js` and `_bg.wasm` but no
+   `_bg.js` — it expects WebAssembly ESM integration. The wasm's 80 imports come
+   from that same ESM (`./rustpython_wasm`), so the build patches the vendored
+   module to accept an instance (`__pyodex_setWasm`), compiles the wasm itself and
+   hands the instance back.
+2. *`eval`.* The generated glue compiles strings with `eval` (Emscripten asm
+   consts), and MV3 extension pages cannot enable `unsafe-eval` — that CSP is fixed
+   by the platform. The manifest declares `"sandbox": {"pages": ["sandbox.html"]}`,
+   which is Chrome's sanctioned relaxation: a sandboxed page may use `eval`, at the
+   cost of an opaque origin and no `chrome.*` APIs. The tier's UI therefore lives
+   *inside* that page, and the bootstrap resolves assets relatively instead of via
+   `chrome.runtime.getURL`.
 
-1. **Sandboxed page**: MV3 allows a manifest `sandbox` page with a relaxed CSP
-   (eval permitted, no `chrome.*` APIs). RustPython would live there and talk to
-   the extension over `postMessage`. That is the sanctioned place for eval-needing
-   runtimes.
-2. **A build without eval**: recompile with wasm-bindgen options that avoid
-   `Function`/`eval`, if such a target exists.
-
-So the third tier is proven feasible at the wasm level and blocked at the CSP
-level. L12 stays experimental; its sweep is blocked on the same thing.
+Harness L12 asserts it in the gate: `runtime=rustpython`, Python painted a marker
+into the sandbox document, no page errors.
 
 The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `button()`,
 `count()`, `text_of()`, `on()`, plus small-tier shims in `pyodex_mp`:

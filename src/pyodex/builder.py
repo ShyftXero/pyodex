@@ -372,7 +372,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
             "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html",
         }))
         resources = ["overlay.html", "bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
         # The cache surface is runtime-agnostic; the manifest references these, so
@@ -395,7 +395,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
-                    bootstrap: str) -> None:
+                    bootstrap: str, page: str = "overlay.html") -> None:
         """Shared shape for a non-Pyodide tier: vendored wasm + its own bootstrap."""
         from . import deps as _deps
 
@@ -414,17 +414,18 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
                                     if (project / "overlay.body.html").exists() else "")
         css = cfg.overlay_css or ((project / "overlay.css").read_text()
                                   if (project / "overlay.css").exists() else "")
-        (out / "overlay.html").write_text(_render((TEMPLATES / "overlay.html").read_text(), {
+        page_html = _render((TEMPLATES / "overlay.html").read_text(), {
             "NAME": cfg.name, "BODY": body, "CSS": css, "SCRIPTS": "",
-        }))
+        })
+        (out / page).write_text(page_html)
         (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
             "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
             "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": page,
         }))
-        resources = ["overlay.html", "bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
+        resources = [page, "bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
         # The manifest references these whenever page caching is on; a tier that
         # omits them makes Chrome reject the whole extension (silently).
         if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
@@ -481,7 +482,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
             "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
+            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html",
         }))
         # CSP forbids inline scripts, so the trigger is a file.
         (out / "brython_run.js").write_text(
@@ -508,9 +509,15 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         return out
 
     if cfg.runtime == "rustpython":
+        # RustPython's glue calls eval, and MV3 extension pages cannot allow
+        # unsafe-eval. A manifest sandbox page can — at the cost of an opaque
+        # origin and no chrome.* APIs, so the widget UI lives in that page.
         _plan_runtime(cfg, [], project)
         _tier_build("rustpython", "rustpython", ("rustpython_wasm.js", "rustpython_wasm_bg.wasm"),
-                    "pyodex_rp.py", "rp_bootstrap.js")
+                    "pyodex_rp.py", "rp_bootstrap.js", page="sandbox.html")
+        manifest = json.loads((out / "manifest.json").read_text())
+        manifest["sandbox"] = {"pages": ["sandbox.html"]}
+        (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         return out
 
     if cfg.runtime == "micropython":
@@ -638,6 +645,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "MAX_LIVE": str(int(cfg.max_live)),
         "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
         "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
+        "OVERLAY_PAGE": "overlay.html",
         "TRIGGERS": json.dumps(cfg.triggers),
         "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
         "RUNTIME_PINS": json.dumps(cfg.runtime_pins),

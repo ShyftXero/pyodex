@@ -9,7 +9,7 @@ import * as rp from "./rustpython/rustpython_wasm.js";
 // imports its helpers from this very module — so we instantiate it here and hand
 // the instance back.
 async function bootWasm() {
-  const bytes = await (await fetch(chrome.runtime.getURL("rustpython/rustpython_wasm_bg.wasm"))).arrayBuffer();
+  const bytes = await (await fetch(url("rustpython/rustpython_wasm_bg.wasm"))).arrayBuffer();
   const mod = await WebAssembly.compile(bytes);
   const imports = {};
   for (const imp of WebAssembly.Module.imports(mod)) {
@@ -42,8 +42,14 @@ window.pyodexReportError = (msg) => {
   setStatus(String(msg).slice(0, 120), true);
 };
 
+// Sandboxed pages have no chrome.* APIs, so resolve against our own URL instead.
+const url = (rel) =>
+  typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
+    ? chrome.runtime.getURL(rel)
+    : new URL(rel, location.href).href;
+
 async function text(rel) {
-  const r = await fetch(chrome.runtime.getURL(rel));
+  const r = await fetch(url(rel));
   if (!r.ok) throw new Error(`fetch ${rel}: ${r.status}`);
   return r.text();
 }
@@ -70,8 +76,10 @@ async function boot() {
   };
 
   setStatus("Running main.py…");
-  rp.pyEval(await text("pyodex_rp.py"), { vars });
-  rp.pyEval(await text("app/main.py"), { vars, stdout: (line) => console.log("[rp]", line) });
+  // One compilation unit: RustPython's pyEval has no module loader for us, so the
+  // shim is concatenated ahead of the app.
+  const source = (await text("pyodex_rp.py")) + "\n" + (await text("app/main.py"));
+  rp.pyEval(source, { vars, stdout: (line) => console.log("[rp]", line) });
   status?.classList.add("hidden");
 }
 
