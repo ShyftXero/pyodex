@@ -143,9 +143,23 @@ def _patch_rustpython_esm(path: Path) -> None:
                       "let wasm = {};\nexport function __pyodex_setWasm(w) { wasm = w; }", src)
     src, n2 = re.subn(r"^wasm\.__wbindgen_start\(\);", "export function __pyodex_start() { wasm.__wbindgen_start(); }",
                       src, flags=re.M)
+    # The glue's only eval-class call is wasm-bindgen's JS `Function` constructor:
+    #
+    #     return addHeapObject(new Function(varg0));
+    #
+    # MV3 extension pages cannot use it, and nothing in pyEval needs JS functions
+    # built from strings. Replacing it with a throwing stub lets the module load in a
+    # normal extension page; if a build ever does need it the failure is loud.
+    src, n3 = re.subn(
+        r"return addHeapObject\(new Function\(varg0\)\);",
+        'throw new Error("new Function is unavailable under extension CSP");',
+        src,
+    )
     if n1 != 1 or n2 != 1:
         raise RuntimeError(f"rustpython ESM patch did not apply (import={n1}, start={n2})")
     path.write_text(src)
+    if n3 != 1:
+        print(f"warning: `new Function` stub applied {n3} time(s); the glue may have changed")
 
 
 def ensure_url_asset(url: str, filename: str, force: bool = False) -> Path:

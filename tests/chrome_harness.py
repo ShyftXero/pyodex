@@ -327,6 +327,8 @@ LEVELS = [
     Level("L11", "l11-micropython", "L11_micropython", "MicroPython tier boots, paints, crypto+http", 11,
           ("primary", "echo")),
     Level("L12", "l12-rustpython", "L12_rustpython", "RustPython tier in a sandbox page", 12, ("primary",)),
+    Level("L13", "l13-rustpython-nosandbox", "L13_rustpython_nosandbox",
+          "RustPython in a normal page (eval-stubbed glue)", 13, ("primary",), experimental=True),
     Level("L14", "demo-01-minimal-ui", "", "demo 01: minimal UI renders and reacts", 14, ("primary",),
           demo="01-minimal-ui"),
     Level("L15", "demo-02-price-compare", "", "demo 02: collects prices, shows the cheapest", 15, ("primary",),
@@ -335,6 +337,8 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L19", "demo-06-api-tour", "", "demo 06: chrome.* and DOM breadth", 19, ("primary",),
+          demo="06-api-tour"),
     Level("L18", "demo-05-tab-watcher", "", "demo 05: always-on watcher, shared interpreter", 18, ("primary",),
           demo="05-tab-watcher"),
 ]
@@ -965,6 +969,47 @@ def check_l18(level, ctx, env, c: Checks) -> None:
     second.close()
 
 
+def check_l13(level, ctx, env, c: Checks) -> None:
+    """RustPython without a sandbox: the glue's new Function is stubbed."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/login.html")
+    frame = overlay_frame(page, 90000)
+    if not c.expect("overlay booted (no sandbox page)", frame is not None, "no overlay frame"):
+        return
+    caps = wait_for(lambda: frame.evaluate("() => window.pyodexCaps || null"), 90)
+    c.expect("runtime is rustpython", bool(caps and caps.get("runtime") == "rustpython"), f"caps={caps!r}")
+    marker = wait_for(lambda: frame.evaluate("() => document.body.getAttribute('data-rp') || null"), 60)
+    c.expect("python reached the DOM from a normal page",
+             bool(marker and marker.startswith("inputs=")), f"marker={marker!r}")
+
+
+def check_l19(level, ctx, env, c: Checks) -> None:
+    """Demo 06: exercise the chrome.* namespaces and the DOM surface."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/login.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    c.expect("prompts to run", bool(wait_for(lambda: "Press Run" in frame_text(frame), 60)),
+             f"text={frame_text(frame)[:120]!r}")
+    frame.click("#tour-btn")
+    text = wait_for(lambda: "call(s) exercised" in frame_text(frame) and frame_text(frame), 90)
+    if not c.expect("tour produced a report", bool(text), f"text={frame_text(frame)[:200]!r}"):
+        return
+    for needle, label in (
+        ("extension id:", "runtime.id"),
+        ("permissions:", "manifest permissions"),
+        ("tabs open:", "tabs.count"),
+        ("windows:", "windows.all"),
+        ("storage.local: local-ok", "storage.local round-trip"),
+        ("action badge: set", "action badge"),
+        ("dom element value: tour@example.com", "element handle set/get"),
+        ("dom set_attr: body[data-tour]=ran", "set_attr on the page"),
+    ):
+        c.expect(label, needle in (text or ""), f"missing {needle!r} in {(text or '')[:260]!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -980,11 +1025,13 @@ CHECKS = {
     "L10": check_l10,
     "L11": check_l11,
     "L12": check_l12,
+    "L13": check_l13,
     "L14": check_l14,
     "L15": check_l15,
     "L16": check_l16,
     "L17": check_l17,
     "L18": check_l18,
+    "L19": check_l19,
 }
 
 

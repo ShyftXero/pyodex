@@ -52,6 +52,7 @@ class ExtConfig:
     overlay_css: str = ""  # inline alternative to overlay.css (single-script mode)
     overlay_body: str = ""  # inline alternative to overlay.body.html
     dev: bool = True  # show the traceback panel; false = console only
+    sandbox: bool = True  # rustpython tier: host it in an MV3 sandbox page (needs eval)
     natural: bool = True  # install pyodex_natural shims (socket/ssl/input/sleep/persistent fs/pip)
     cache: bool = True  # digest-verified blob cache + per-site opt-out options page
     # Ordered, cheapest first. The build picks the first tier that satisfies what
@@ -133,6 +134,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         overlay_css=ext.get("overlay_css", ""),
         overlay_body=ext.get("overlay_body", ""),
         dev=ext.get("dev", True),
+        sandbox=ext.get("sandbox", True),
         natural=ext.get("natural", True),
         cache=ext.get("cache", True),
         runtimes=ext.get("runtimes"),
@@ -452,11 +454,13 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         # unsafe-eval. A manifest sandbox page can — at the cost of an opaque
         # origin and no chrome.* APIs, so the widget UI lives in that page.
         _plan_runtime(cfg, [], project)
+        page = "sandbox.html" if cfg.sandbox else "overlay.html"
         _tier_build("rustpython", "rustpython", ("rustpython_wasm.js", "rustpython_wasm_bg.wasm"),
-                    "pyodex_rp.py", "rp_bootstrap.js", page="sandbox.html")
-        manifest = json.loads((out / "manifest.json").read_text())
-        manifest["sandbox"] = {"pages": ["sandbox.html"]}
-        (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+                    "pyodex_rp.py", "rp_bootstrap.js", page=page)
+        if cfg.sandbox:
+            manifest = json.loads((out / "manifest.json").read_text())
+            manifest["sandbox"] = {"pages": ["sandbox.html"]}
+            (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         return out
 
     if cfg.runtime == "micropython":

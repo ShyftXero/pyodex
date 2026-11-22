@@ -606,7 +606,9 @@ class Element:
         return values[self.index] if len(values) > self.index else None
 
     async def value(self) -> Any:
-        return await self.attr("value")
+        """The element's *property* value (what a user typed), not its attribute."""
+        nodes = await self.page.query(self.selector)
+        return nodes[self.index].get("value") if len(nodes) > self.index else None
 
     async def set_value(self, value: str) -> None:
         await self.page.set_value(self.selector, value, index=self.index)
@@ -745,6 +747,9 @@ class Page:
             except PageError:
                 out[sel] = False
         return out
+
+    async def set_attr(self, sel: str, name: str, value: Any, index: int = 0) -> None:
+        await self.dom("set_attr", sel, attr=name, value=value, index=index)
 
     async def click(self, sel: str, index: int = 0) -> None:
         await self.dom("click", sel, index=index)

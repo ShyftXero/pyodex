@@ -389,6 +389,11 @@ informative: `no module named '__future__'`, `atexit`, `collections.abc`, and
 newer annotation syntax. That is the honest shape of this tier — it is for small,
 in-page logic, not for pulling in the world.
 
+## Research notes
+
+- [`docs/prior-art.md`](docs/prior-art.md) — what people dislike about Python-in-the-browser, mapped to our answers.
+- [`docs/lessons-from-exploit-research.md`](docs/lessons-from-exploit-research.md) — what a CSP/worker investigation actually bought (a runtime tier, an upstream ask, two policies) and what it did not.
+
 ## Prior art, and what people dislike about it
 
 Surveyed the public discussions (PyScript 402 pts/234 comments, Brython 403/214,

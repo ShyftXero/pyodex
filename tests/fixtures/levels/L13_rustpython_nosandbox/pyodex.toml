@@ -1,0 +1,7 @@
+[extension]
+name = "L13 RustPython NoSandbox"
+matches = ["<all_urls>"]
+http = false
+boot = "auto"
+runtime = "rustpython"
+sandbox = false

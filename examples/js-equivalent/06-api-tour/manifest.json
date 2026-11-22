@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Demo 06 API Tour (JS)",
+  "version": "1.0.0",
+  "description": "The same chrome.* + DOM tour as demo 06, in JavaScript. Content script is a launcher; the tour runs in an extension page so chrome.* is available \u2014 the same shape pyodex uses.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "cs.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "tour.html",
+        "tour.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "Demo 06 API Tour (JS)"
+  }
+}
