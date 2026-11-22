@@ -43,12 +43,14 @@ async function handleBlob(url, explicitDigest = null) {
   // Verification order: caller-supplied (our own bootstrap, digest pinned at
   // build time), build-pinned URL, then the version lockfile. Anything we cannot
   // verify passes through to the network rather than being served blind.
-  let digest = explicitDigest;
+  // A pin is an explicit authorisation from the build: honour it before the
+  // pattern check, so a tier whose URL shape we do not know can still be cached.
+  let digest = explicitDigest || RUNTIME_PINS[url];
   if (!digest) {
     if (!isRuntimeBlob(url) && !PYODIDE_URL.test(url)) {
       return { handled: false, reason: "not a runtime blob" };
     }
-    digest = RUNTIME_PINS[url] || (PYODIDE_URL.test(url) ? await expectedDigest(url) : null);
+    digest = PYODIDE_URL.test(url) ? await expectedDigest(url) : null;
   }
   if (!digest) return { handled: false, reason: "unverified" };
   const { data, source } = await cachedFetch(url, digest);

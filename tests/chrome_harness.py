@@ -59,7 +59,7 @@ LOGIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login</t
 </body></html>"""
 
 PAGE_CACHE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pyodide page</title></head>
-<body><h1>app that uses pyodide</h1><div id="net">pending</div>
+<body><h1>app that uses pyodide</h1><div id="net">pending</div><div id="mp">pending</div>
 <script>
   // Mimics what the Pyodide loader does: fetch a blob from the CDN path.
   (async () => {
@@ -69,6 +69,10 @@ PAGE_CACHE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pyo
       const buf = await r.arrayBuffer();
       const src = r.headers.get("x-pyodex-source") || "cdn";
       document.getElementById("net").textContent = `source=${src} len=${buf.byteLength}`;
+      const mp = await fetch("/mp/micropython.wasm");
+      const mbuf = await mp.arrayBuffer();
+      document.getElementById("mp").textContent =
+        `source=${mp.headers.get("x-pyodex-source") || "cdn"} len=${mbuf.byteLength}`;
     } catch (e) {
       document.getElementById("net").textContent = "error=" + e.message;
     }
@@ -110,6 +114,8 @@ class Blobs:
 
 BLOBS = Blobs()
 PYODIDE_DIR = Path.home() / ".cache" / "pyodex" / "pyodide-314.0.8"
+MP_BLOB = b"mp-wasm-bytes" + b"y" * 1024
+MP_SHA = __import__("hashlib").sha256(MP_BLOB).hexdigest()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -119,6 +125,16 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("content-type", "application/octet-stream")
             self.send_header("cache-control", "no-store")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/mp/"):
+            BLOBS.payload("mp")
+            body = MP_BLOB
+            self.send_response(200)
+            self.send_header("content-type", "application/wasm")
+            self.send_header("access-control-allow-origin", "*")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -513,6 +529,11 @@ def check_l6(level, ctx, env, c: Checks) -> None:
     c.expect("second page served from the extension's cache",
              bool(cached) and "source=cache" in (cached or ""), f"net={second.inner_text('#net')!r}")
     c.expect("CDN was not contacted again", BLOBS.count("wheel") == 1, f"count={BLOBS.count('wheel')}")
+    mp_first = wait_for(lambda: second.inner_text("#mp") if "source=" in second.inner_text("#mp") else None, 30)
+    c.expect("a MicroPython blob was served from cache too",
+             bool(mp_first) and "source=cache" in (mp_first or ""), f"mp={second.inner_text('#mp')!r}")
+    c.expect("the MicroPython blob was not re-fetched", BLOBS.count("mp") == 1,
+             f"count={BLOBS.count('mp')}")
     second.close()
 
     # Opt this host out through the service worker, then confirm the page goes
@@ -835,6 +856,18 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
     dst = work / level.fixture
     if dst.exists():
         shutil.rmtree(dst)
+    if level.name == "L6":
+        src = FIXTURES / level.fixture
+        shutil.copytree(src, dst)
+        toml = dst / "pyodex.toml"
+        base = f"http://127.0.0.1:{ports['http']}"
+        toml.write_text(
+            toml.read_text()
+            + '\n[runtime_pins]\n'
+            + f'"{base}/mp/micropython.wasm" = "{MP_SHA}"\n'
+        )
+        return build_extension(dst, work / "dist" / level.slug)
+
     if level.name == "L11":
         src = FIXTURES / level.fixture
         shutil.copytree(src, dst)
