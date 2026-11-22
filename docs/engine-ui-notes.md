@@ -139,6 +139,27 @@ creation, or an offscreen-specific policy is blocking script execution.
 All three need the offscreen target's own console
 (`chrome://extensions` → inspect), which the Playwright harness cannot read.
 
+## Root cause: the harness cannot run offscreen documents at all
+
+Control experiment inside the same build: create an offscreen document pointing at
+a two-line page (`ping.html` → `ping.js` → `chrome.storage.local.set`) and read the
+storage key. Result: `{}` — the document is created
+(`hasDocument() === true`) but its script never executes.
+
+So every symptom in this file — `Receiving end does not exist`, `_ATTACH_HANDLERS
+== 0`, the unwritten marker — is explained by the *environment*, not by our code:
+Playwright's Chromium (159) creates offscreen documents but does not run scripts in
+them, headless or headed. `engine.js`, `engine.html` and the message routing were
+never actually exercised.
+
+This also means L9 cannot be verified in this harness, and stable Chrome 137+ cannot
+load unpacked extensions, so there is no automated path to a green L9 today. It
+stays experimental for that reason — *unverifiable here*, not *known broken*.
+
+To verify for real: load the built extension in a Chrome that accepts
+`--load-extension` (or load it unpacked manually) and inspect
+`chrome://extensions` → the offscreen document.
+
 ## Next steps, cheapest first
 
 1. Reproduce the hop in isolation (no pyodex): a three-file extension where the
