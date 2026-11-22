@@ -243,11 +243,14 @@ URLs even though we ship neither, so other pages running those runtimes are serv
 from our cache when a digest is pinned.
 
 `rustpython_wasm@0.1.0-pre-alpha.2` is vendored and wired (build + bootstrap +
-`pyodex_rp.py` reaching the page through `js_vars`), but it cannot boot: its ESM
-entry imports `./rustpython_wasm_bg`, and the npm package ships only
-`rustpython_wasm_bg.wasm` — the glue module is expected to be produced by a
-bundler. Making this tier work needs either a build step that emits that file or a
-newer upstream artifact. Harness L12 exists and is marked experimental.
+`pyodex_rp.py` reaching the page through `js_vars`), but it cannot boot. Cause,
+confirmed against the package file list (`unpkg ?meta`): the ESM entry does
+`import * as wasm from "./rustpython_wasm_bg"` and the package ships only
+`rustpython_wasm_bg.wasm` — it expects **WebAssembly ESM integration** (importing a
+`.wasm` as a module), which Chrome gates behind a flag. So this artifact needs
+either a bundling step that emits the glue, an artifact built with wasm-bindgen's
+`--target bundler` plus a bundler, or a future release. Harness L12 exists and is
+marked experimental; the sweep for this tier is blocked on the same thing.
 
 The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `button()`,
 `count()`, `text_of()`, `on()`, plus small-tier shims in `pyodex_mp`:
