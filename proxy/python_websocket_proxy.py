@@ -195,7 +195,7 @@ def _http_response(writer, status: int, body: bytes, ctype: str = "application/j
         f"Content-Type: {ctype}\r\n"
         f"Content-Length: {len(body)}\r\n"
         "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Headers: content-type\r\n"
+        "Access-Control-Allow-Headers: content-type, x-pyodex-b64\r\n"
         "Cache-Control: no-store\r\n"
         "Connection: close\r\n\r\n"
     ).encode()
@@ -256,6 +256,10 @@ async def _http_client(reader, writer, proxy: "Proxy") -> None:
             r, w = sess
 
             if op == "send":
+                if headers.get("x-pyodex-b64"):
+                    import base64 as _b64
+
+                    body = _b64.b64decode(body or b"")
                 w.write(body)
                 await w.drain()
                 _http_response(writer, 200, b'{"sent":%d}' % len(body))

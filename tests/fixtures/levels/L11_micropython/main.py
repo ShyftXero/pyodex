@@ -24,13 +24,29 @@ def probe(name, fn):
 probe("data-crypto", lambda: f"sha={ui.sha256_hex('abc')[:12]} mac={ui.hmac_sha256_hex('k', 'm')[:12]}")
 probe("data-http", lambda: ui.http_get(HTTP_URL)[:40])
 def sock_probe():
-    """Socket() is present but its in-page path is unverified.
+    """Record how far the sequence gets; each step persists on the DOM so the
+    first fatal call is identifiable after the interpreter dies."""
+    stage = []
 
-    The HTTP bridge on the proxy is proven with curl (open/send/recv/close against
-    a real TCP echo server). Driving it from MicroPython's synchronous XHR kills
-    the interpreter during the run, so we do not claim it works here.
-    """
-    return "bridge-ok-unverified-in-page" if hasattr(ui, "Socket") else "no-shim"
+    def mark(v):
+        stage.append(v)
+        ui.set_attr("body", "data-sock", "/".join(stage))
+
+    try:
+        mark("ctor")
+        sock = ui.Socket("127.0.0.1", ECHO_PORT, bridge=BRIDGE)
+        mark("open")
+        sock.connect()
+        mark("connected")
+        sock.send(b"PING\n")
+        mark("sent")
+        data = sock.recv()
+        mark("recv:%s" % data.decode().strip())
+        sock.close()
+        mark("closed")
+    except Exception as e:
+        mark("err:%s:%s" % (type(e).__name__, str(e)[:60]))
+    return "/".join(stage)
 
 
 probe("data-sock", sock_probe)

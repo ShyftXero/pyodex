@@ -751,8 +751,8 @@ def check_l11(level, ctx, env, c: Checks) -> None:
     sock = frame.evaluate("() => document.body.getAttribute('data-sock') || ''")
     # The HTTP bridge is verified with curl; from an extension page the sync XHR is
     # blocked as mixed content, so we assert the *finding*, not a success.
-    c.expect("small-tier socket shim is present and honestly unverified",
-             sock == "bridge-ok-unverified-in-page", f"sock={sock!r}")
+    c.expect("real TCP from the 2 MB tier via the proxy HTTP bridge",
+             "recv:echo:PING" in (sock or ""), f"sock={sock!r}")
 
 
 def check_l12(level, ctx, env, c: Checks) -> None:

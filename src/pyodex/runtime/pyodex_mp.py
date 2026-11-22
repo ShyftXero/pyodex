@@ -50,6 +50,15 @@ def on(target, event, fn):
     return fn
 
 
+def set_attr(selector, name, value):
+    """Set an attribute on the first matching element; returns whether it existed."""
+    e = document.querySelector(selector)
+    if e is None:
+        return False
+    e.setAttribute(name, str(value))
+    return True
+
+
 def count(sel):
     return document.querySelectorAll(sel).length
 
@@ -126,6 +135,14 @@ class SocketUnsupported(NotImplementedError):
     pass
 
 
+def _xhr_b64(method, url, body):
+    xhr = js.XMLHttpRequest.new()
+    xhr.open(method, url, False)
+    xhr.setRequestHeader("x-pyodex-b64", "1")
+    xhr.send(body)
+    return xhr.responseText
+
+
 def _xhr(method, url, body=None):
     xhr = js.XMLHttpRequest.new()
     xhr.open(method, url, False)
@@ -164,9 +181,18 @@ class Socket:
         return self
 
     def send(self, data):
+        """Send bytes as base64 text.
+
+        Passing a Python bytes object straight to XHR.send() terminates the
+        MicroPython interpreter (no exception, no traceback), so the body is
+        always text and the proxy decodes it.
+        """
+        import binascii
+
         if isinstance(data, str):
             data = data.encode()
-        _xhr("POST", self._url("/send?id=" + self.id), bytes(data))
+        body = binascii.b2a_base64(bytes(data)).decode().strip()
+        _xhr_b64("POST", self._url("/send?id=" + self.id), body)
         return len(data)
 
     def sendall(self, data):
@@ -178,7 +204,13 @@ class Socket:
 
         t = self.timeout if timeout is None else timeout
         out = json.loads(_xhr("GET", self._url("/recv?id=%s&timeout=%s" % (self.id, t))))
-        return binascii.a2b_base64(out["data"])
+        raw = out.get("data") or ""
+        if not raw:
+            return b""
+        try:
+            return binascii.a2b_base64(raw)
+        except TypeError:  # MicroPython wants bytes here
+            return binascii.a2b_base64(raw.encode())
 
     def recv_until(self, sep=b"\n", limit=1 << 20):
         buf = b""

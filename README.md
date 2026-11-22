@@ -256,7 +256,7 @@ The MicroPython tier gives you in-page DOM access at ~2 MB — `status()`, `butt
 |---|---|
 | `sha256_hex()` / `hmac_sha256_hex()` | works (MicroPython's hashlib has no `hexdigest()`, so it hexlifies the raw digest) |
 | `http_get()` / `http_post_json()` | works, via *synchronous* XHR — it blocks the tab, so it is for occasional small calls, not heavy traffic |
-| `Socket(host, port, bridge=...)` | TCP through the proxy's new **HTTP bridge** (`/tcp/HOST/PORT/open|send|recv|close`), verified with curl against a real echo server. Driving it from MicroPython's synchronous XHR is **unverified** — the interpreter dies mid-run, so the shim is present but not claimed working. The Pyodide tier remains the socket path |
+| `Socket(host, port, bridge=...)` | **Real TCP** through the proxy's HTTP bridge (`/tcp/HOST/PORT/open|send|recv|close`). Verified in-browser: `open → send → recv:echo:PING → close`. Each `recv()` is a long-poll, so this is a latency trade against the Pyodide tier's duplex socket, not a capability one |
 
 ### Compatibility sweeps, per tier
 
