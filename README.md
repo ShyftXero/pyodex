@@ -389,6 +389,14 @@ informative: `no module named '__future__'`, `atexit`, `collections.abc`, and
 newer annotation syntax. That is the honest shape of this tier — it is for small,
 in-page logic, not for pulling in the world.
 
+## Prior art, and what people dislike about it
+
+Surveyed the public discussions (PyScript 402 pts/234 comments, Brython 403/214,
+Transcrypt 121/51) and mapped every recurring complaint onto what we do:
+[`docs/prior-art.md`](docs/prior-art.md). The short version — the objections are
+cold start, unclear limits, leaking interop, and being a "crutch" for people
+avoiding JS. Those are design requirements, not opinions to argue with.
+
 ## Novelty ledger
 
 What here is new, and what is the platform used well. This is a claim register, not
