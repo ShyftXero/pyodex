@@ -215,7 +215,7 @@ each one is a **capability** claim, not just a size, so selection is mechanical:
 | Tier | ~Size | Capabilities | Status |
 |---|---|---|---|
 | `micropython` | 2 MB | DOM, subset of stdlib, no packages | **implemented** |
-| `brython` | 2 MB | DOM, subset of stdlib, no wasm at all | vendored, **does not reach main.py yet** |
+| `brython` | 1.1 MB | DOM, no wasm at all | vendored, **does not reach main.py yet** (see below) |
 | `rustpython` | 5 MB | wider stdlib than MicroPython, no DOM bridge, no CPython fidelity | vendored, **does not boot yet** (see below) |
 | `pyodide` | 55 MB | full CPython, packages, sockets, crypto | implemented |
 
@@ -242,6 +242,16 @@ loader) plus a bootstrap; nothing else in the build knows tier names. The blob
 cache is runtime-agnostic too: `cache_patterns()` covers MicroPython and RustPython
 URLs even though we ship neither, so other pages running those runtimes are served
 from our cache when a digest is pinned.
+
+**Brython** was added as the third tier precisely because it needs no wasm glue and
+no ESM-integration flag. It is vendored (1.1 MB) and the overlay is built the way
+Brython expects — `<script type="text/python" src="app/combined.py">` with the shim
+concatenated ahead of the app, plus an external trigger (CSP forbids inline). What
+blocks it: `brython@3.12.4/brython.min.js` exposes **no public entry point** —
+`window.brython`, `__BRYTHON__.brython` and `__BRYTHON__.run` are all `undefined`
+after load — so there is nothing for us to call, and its own auto-run never
+compiles our script. Next step would be shipping `brython_stdlib.js` (4.4 MB) or
+finding the documented bootstrap for this build. L13 is experimental.
 
 `rustpython_wasm@0.1.0-pre-alpha.2` is vendored and wired (build + bootstrap +
 `pyodex_rp.py` reaching the page through `js_vars`), but it cannot boot. Cause,

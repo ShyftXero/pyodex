@@ -4,7 +4,9 @@ Brython runs Python in the page with a real DOM, so this stays thin: it is a
 convenience layer over `browser.document`, not a bridge.
 """
 
-from browser import document
+# Brython exposes `document` as a builtin in scripts; importing `browser` would
+# require brython_stdlib.js (4.4 MB), which this tier exists to avoid.
+document = document
 
 
 def status(text, error=False):

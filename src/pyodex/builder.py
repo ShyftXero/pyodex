@@ -474,6 +474,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             + body +
             "<div id='pyodex-status'>Loading Brython…</div>"
             "<script type='text/python' src='app/combined.py'></script>"
+            "<script src='brython_run.js'></script>"
             "</body></html>\n")
         (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
             "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
@@ -482,7 +483,11 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
             "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false",
         }))
-        resources = ["overlay.html", "pyodex_br.py", "app/*", "brython/*"]
+        # CSP forbids inline scripts, so the trigger is a file.
+        (out / "brython_run.js").write_text(
+            "window.brython ? brython({debug:0}) : "
+            "(window.__BRYTHON__ && __BRYTHON__.brython ? __BRYTHON__.brython({debug:0}) : null);\n")
+        resources = ["overlay.html", "pyodex_br.py", "brython_run.js", "app/*", "brython/*"]
         # Same trap as the other tiers: the manifest references these whenever page
         # caching is on, and a missing file makes Chrome reject the extension.
         if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
