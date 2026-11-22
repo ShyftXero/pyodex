@@ -391,6 +391,8 @@ in-page logic, not for pulling in the world.
 
 ## Research notes
 
+- [`docs/chrome-api-coverage.md`](docs/chrome-api-coverage.md) — every chrome.* namespace: wrapped, exercised, or a stated gap.
+
 - [`docs/prior-art.md`](docs/prior-art.md) — what people dislike about Python-in-the-browser, mapped to our answers.
 - [`docs/lessons-from-exploit-research.md`](docs/lessons-from-exploit-research.md) — what a CSP/worker investigation actually bought (a runtime tier, an upstream ask, two policies) and what it did not.
 
