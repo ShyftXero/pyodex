@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 72" width="300" height="72" role="img" aria-label="pyodex">
+  <title>pyodex</title>
+  <defs>
+    <linearGradient id="tile2" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b1b1f"/><stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="snake2" x1="14" y1="52" x2="52" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e16867"/><stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(4 4)">
+    <path d="M14 4h36a10 10 0 0 1 10 10v36a10 10 0 0 1-10 10H14A10 10 0 0 1 4 50V14A10 10 0 0 1 14 4Z"
+          fill="url(#tile2)" stroke="#2f2f35" stroke-width="1.5"/>
+    <path d="M22 52V22a6 6 0 0 1 6-6h9a8 8 0 0 1 0 16h-9"
+          fill="none" stroke="url(#snake2)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M37 41 45 47.5 37 54" fill="none" stroke="#f4f4f5" stroke-width="3.8"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="80" y="47" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif"
+        font-size="38" font-weight="700" letter-spacing="-1.6" fill="#f4f4f5">pyodex</text>
+</svg>

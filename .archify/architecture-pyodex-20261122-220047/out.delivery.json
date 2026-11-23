@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "19983048-da76-45b3-930c-665911f622c3",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/candidate.json",
+  "output": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.html",
+  "specification": {
+    "sha256": "943f40883cff53a7205cc5b3bc52ff782319fdafc281e25a36843f8feb0dc339",
+    "bytes": 3533
+  },
+  "artifact": {
+    "sha256": "d793bab5d9a44b9c5efc4cba254e74c0fd550036b38051c69c64d43787859bf5",
+    "bytes": 847507
+  }
+}

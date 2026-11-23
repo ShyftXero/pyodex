@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/candidate.json",
+    "sha256": "943f40883cff53a7205cc5b3bc52ff782319fdafc281e25a36843f8feb0dc339",
+    "bytes": 3533
+  },
+  "artifact": {
+    "path": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.html",
+    "sha256": "d793bab5d9a44b9c5efc4cba254e74c0fd550036b38051c69c64d43787859bf5",
+    "bytes": 847507
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "fail"
+  },
+  "failedStage": "browser-check",
+  "diagnostics": [
+    {
+      "code": "viewer/evidence-path-conflict",
+      "severity": "error",
+      "message": "browser-check will not replace the existing unowned evidence path \"/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.browser-check.json\".",
+      "subject": {
+        "artifact": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.html",
+        "evidencePath": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.browser-check.json"
+      },
+      "evidence": {
+        "reason": {
+          "code": "ownership-artifact-mismatch"
+        }
+      },
+      "supportedFixes": [
+        "move the conflicting file aside, or choose a separate --out-dir, then rerun browser-check"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.finalize.json",
+    "summaryReceipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.finalize-summary.json",
+    "browserCheckReceipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/architecture-pyodex-20261122-220047/out.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-22T09:24:03.212Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1622,
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  }
+}

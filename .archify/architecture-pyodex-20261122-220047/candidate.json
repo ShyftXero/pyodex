@@ -1,0 +1,252 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "pyodex \u2014 three realms, one interpreter",
+  "output": "pyodex-architecture.html",
+  "quality_profile": "showcase",
+  "viewBox": [
+   1180,
+   660
+  ],
+  "visual_preset": "signal-flow"
+ },
+ "components": [
+  {
+   "id": "page",
+   "type": "external",
+   "label": "Host page",
+   "sublabel": "someone else's DOM",
+   "pos": [
+    30,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "cs",
+   "type": "frontend",
+   "label": "Content script",
+   "sublabel": "injector.js",
+   "pos": [
+    30,
+    180
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "main",
+   "type": "frontend",
+   "label": "Page MAIN world",
+   "sublabel": "fetch + page ops",
+   "pos": [
+    30,
+    420
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "overlay",
+   "type": "backend",
+   "label": "Overlay iframe",
+   "sublabel": "Pyodide \u00b7 main.py",
+   "pos": [
+    300,
+    180
+   ],
+   "size": [
+    170,
+    72
+   ]
+  },
+  {
+   "id": "pages",
+   "type": "frontend",
+   "label": "Popup / side panel",
+   "sublabel": "popup.py \u00b7 panel.py",
+   "pos": [
+    300,
+    60
+   ],
+   "size": [
+    170,
+    64
+   ]
+  },
+  {
+   "id": "agent",
+   "type": "backend",
+   "label": "Agent iframes",
+   "sublabel": "ui = engine",
+   "pos": [
+    300,
+    330
+   ],
+   "size": [
+    170,
+    64
+   ]
+  },
+  {
+   "id": "bg",
+   "type": "messagebus",
+   "label": "Service worker",
+   "sublabel": "bg.js \u00b7 event bridge",
+   "pos": [
+    560,
+    180
+   ],
+   "size": [
+    180,
+    72
+   ]
+  },
+  {
+   "id": "engine",
+   "type": "backend",
+   "label": "SharedWorker",
+   "sublabel": "one interpreter",
+   "pos": [
+    560,
+    330
+   ],
+   "size": [
+    180,
+    64
+   ]
+  },
+  {
+   "id": "cache",
+   "type": "database",
+   "label": "Blob cache",
+   "sublabel": "digest-verified",
+   "pos": [
+    560,
+    470
+   ],
+   "size": [
+    180,
+    64
+   ]
+  },
+  {
+   "id": "chrome",
+   "type": "cloud",
+   "label": "chrome.* APIs",
+   "sublabel": "tabs \u00b7 storage \u00b7 dnr",
+   "pos": [
+    860,
+    110
+   ],
+   "size": [
+    180,
+    72
+   ]
+  },
+  {
+   "id": "site",
+   "type": "external",
+   "label": "Sites and CDNs",
+   "sublabel": "pyodide \u00b7 wheels",
+   "pos": [
+    860,
+    430
+   ],
+   "size": [
+    180,
+    64
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Host page (page's CSP applies)",
+   "wraps": [
+    "page",
+    "cs",
+    "main"
+   ]
+  },
+  {
+   "kind": "security-group",
+   "label": "Extension origin",
+   "wraps": [
+    "overlay",
+    "pages",
+    "agent",
+    "bg",
+    "engine",
+    "cache"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "c1",
+   "from": "cs",
+   "to": "page",
+   "label": "DOM ops"
+  },
+  {
+   "id": "c2",
+   "from": "cs",
+   "to": "main",
+   "label": "MAIN world"
+  },
+  {
+   "id": "c3",
+   "from": "main",
+   "to": "overlay",
+   "label": "postMessage",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "c4",
+   "from": "overlay",
+   "to": "bg",
+   "label": "events",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "c5",
+   "from": "overlay",
+   "to": "chrome",
+   "label": "chrome.*",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c6",
+   "from": "agent",
+   "to": "engine",
+   "label": "ports"
+  },
+  {
+   "id": "c7",
+   "from": "main",
+   "to": "site",
+   "label": "fetch",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "c8",
+   "from": "engine",
+   "to": "cache",
+   "label": "digests"
+  }
+ ],
+ "cards": []
+}

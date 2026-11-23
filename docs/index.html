@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pyodex — write Chrome extensions in Python</title>
+<link rel="icon" href="../assets/favicon.svg">
+<style>
+  :root {
+    --paper: #0b0b0d; --panel: #131316; --line: #27272a;
+    --ink: #f4f4f5; --muted: #a1a1aa; --accent: #f43f5e; --accent-2: #e16867;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans);
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 72px 24px 96px; }
+  .eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase;
+             color: var(--accent); margin: 0 0 22px; }
+  h1 { font-size: clamp(38px, 6vw, 60px); line-height: 1.02; letter-spacing: -0.03em; margin: 0 0 20px;
+       font-weight: 700; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 46ch; margin: 0 0 34px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 64px; }
+  .cta a { text-decoration: none; font-weight: 600; padding: 12px 20px; border-radius: 999px;
+           border: 1px solid var(--line); color: var(--ink); transition: .15s; }
+  .cta a:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .cta a.primary { background: var(--accent); border-color: var(--accent); color: #14060a; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  a.card { display: block; text-decoration: none; color: inherit; background: var(--panel);
+           border: 1px solid var(--line); border-radius: 14px; padding: 22px; transition: .15s; }
+  a.card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card h2 { margin: 0 0 6px; font-size: 17px; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .card .tag { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+               color: var(--accent-2); display: block; margin-bottom: 10px; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+        padding: 18px; overflow-x: auto; font: 13px/1.7 var(--mono); }
+  .k { color: #7dd3fc; } .s { color: #fca5a5; } .c { color: #6b7280; }
+  footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: 13px; }
+  footer a { color: var(--ink); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img src="../assets/logo.svg" alt="pyodex" height="46" style="margin-bottom:34px">
+  <p class="eyebrow">Chrome MV3 · CPython on wasm</p>
+  <h1>Chrome extensions,<br><em>in Python.</em></h1>
+  <p class="lede">One file, one build. Your Python runs in the extension origin —
+     with <code>chrome.*</code> as ordinary objects, permissions derived from your code,
+     and browser events arriving as function calls.</p>
+  <div class="cta">
+    <a class="primary" href="explainers/architecture.html">Open the architecture →</a>
+    <a href="explainers/event-sequence.html">How an event reaches Python</a>
+    <a href="explainers/build.html">What the build decides</a>
+  </div>
+
+<pre><span class="c"># main.py — the whole extension</span>
+<span class="k">from</span> pyodex_runtime <span class="k">import</span> Overlay, chrome, on
+
+ui = Overlay()
+ui.card(<span class="s">"Hello"</span>).body.innerText = <span class="s">"from Python"</span>
+
+<span class="c">@chrome.on("storage.onChanged")</span>
+<span class="k">def</span> changed(args):
+    ui.badge(<span class="s">"storage moved"</span>)</pre>
+
+  <div class="grid" style="margin-top:56px">
+    <a class="card" href="explainers/architecture.html">
+      <span class="tag">explainer · architecture</span>
+      <h2>Three realms, one interpreter</h2>
+      <p>Host page, extension origin, service worker — and which one holds your code.</p>
+    </a>
+    <a class="card" href="explainers/event-sequence.html">
+      <span class="tag">explainer · sequence</span>
+      <h2>A browser event reaching Python</h2>
+      <p>Build-time registration in the worker, then dispatch into your function.</p>
+    </a>
+    <a class="card" href="explainers/build.html">
+      <span class="tag">explainer · workflow</span>
+      <h2>What the build decides</h2>
+      <p>Runtime tier, manifest permissions, event list — derived, not hand-edited.</p>
+    </a>
+  </div>
+
+  <footer>
+    Each explainer is standalone: dark/light toggle, motion, and export.
+    Source and docs live in <a href="https://github.com/ShyftXero/pyodex">ShyftXero/pyodex</a>.
+  </footer>
+</div>
+</body>
+</html>

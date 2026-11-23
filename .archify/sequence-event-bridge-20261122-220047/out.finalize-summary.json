@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/sequence-event-bridge-20261122-220047/candidate.json",
+    "sha256": "814643d9dc9b451af0e13cbdae6bd52765820f269f74f0a64412be6c04db4096",
+    "bytes": 2080
+  },
+  "artifact": {
+    "path": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/sequence-event-bridge-20261122-220047/out.html",
+    "sha256": "2d7a8e0ecd62ab8ff7b86b34bfcd25cbf3ac5ebf1a4db9d4aef2d9535e0d213b",
+    "bytes": 831383
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/sequence-event-bridge-20261122-220047/out.finalize.json",
+    "summaryReceipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/sequence-event-bridge-20261122-220047/out.finalize-summary.json",
+    "browserCheckReceipt": "/home/shyft/Dropbox/code/python_chrome_extensions/.archify/sequence-event-bridge-20261122-220047/out.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-22T09:24:03.212Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 5754,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

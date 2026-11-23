@@ -1,8 +1,76 @@
-# pyodex — Python Chrome extensions on Pyodide
+<img src="assets/logo.svg" alt="pyodex" height="56">
+
+**Chrome extensions, in Python.** MV3, CPython on wasm, offline by default.
+
+[![PyPI](https://img.shields.io/pypi/v/pyodex?color=f43f5e)](https://pypi.org/project/pyodex/)
+[![gate](https://img.shields.io/badge/gate-28%2F28-0b0b0d)](tests/chrome_harness.py)
+[![tests](https://img.shields.io/badge/unit_tests-60-0b0b0d)](tests/)
+![runtime](https://img.shields.io/badge/Python-3.14_·_Pyodide_0.28-0b0b0d)
+![manifest](https://img.shields.io/badge/Manifest-V3-0b0b0d)
+[![license](https://img.shields.io/badge/license-MIT-0b0b0d)](LICENSE)
+
+[**Architecture**](https://shyftxero.github.io/pyodex/explainers/architecture.html) ·
+[**How an event reaches Python**](https://shyftxero.github.io/pyodex/explainers/event-sequence.html) ·
+[**What the build decides**](https://shyftxero.github.io/pyodex/explainers/build.html) ·
+[site](https://shyftxero.github.io/pyodex/)
+
+> Opening those three in a browser is the interactive part: dark/light toggle, motion,
+> zoom, and export. A GitHub README cannot run JavaScript — `_markup_` here is limited to
+> Mermaid, `<details>`, badges and static SVG, so anything genuinely interactive lives on
+> the Pages site instead of being faked in markdown.
+
+```python
+# main.py — the whole extension
+from pyodex_runtime import Overlay, chrome, on
+
+ui = Overlay()
+ui.card("Hello").body.innerText = "from Python"
+
+@chrome.on("storage.onChanged")
+def changed(args):
+    ui.badge("storage moved")
+```
+
+```bash
+uv add pyodex && uv run pyodex init my-ext && cd my-ext && uv run pyodex build . --out dist
+# then Chrome → chrome://extensions → Load unpacked → dist
+```
 
 Write a Chrome (Manifest V3) extension in Python. `pyodex` scaffolds the project,
 bundles a local Pyodide runtime, resolves your Python dependencies for the
 wasm32 target, and emits a loadable unpacked extension.
+
+## See it
+
+A demo running for real: `color.wasm` painting a canvas inside an unrelated page, driven
+from Python, with the demo stating its own cheat (it borrows the page's canvas — see
+[demo 13](examples/demos/13-doomlike/)).
+
+<img src="assets/demo-13-wasm-canvas.png" alt="Demo 13: wasm painting a canvas in a host page" width="820">
+
+How the pieces fit (Mermaid renders natively on GitHub — click-free, unlike the Pages
+explainers which are fully interactive):
+
+```mermaid
+flowchart TB
+  subgraph page["Host page — the page's CSP applies"]
+    direction LR
+    dom["Page DOM"] --> cs["injector.js<br/>content script"] --> main["MAIN world<br/>fetch + page ops"]
+  end
+  subgraph ext["Extension origin — your Python lives here"]
+    direction LR
+    ov["Overlay iframe<br/>Pyodide · main.py"]
+    sw["bg.js<br/>service worker"]
+    eng["SharedWorker<br/>one interpreter"]
+  end
+  api["chrome.* APIs"]
+
+  main -- postMessage --> ov
+  ov -- "chrome.* calls" --> api
+  api -. "events" .-> sw
+  sw -. "pyodex-event" .-> ov
+  eng -. "ui = engine" .-> ov
+```
 
 ## Fastest path: one script
 
@@ -339,6 +407,10 @@ framebuffer, imports for time/input), but it is a real piece of work, not a demo
 
 ## Demos
 
+<details>
+<summary><b>The eleven demos</b> — click to expand</summary>
+
+
 Five extensions, all pure Python, escalating from "does the loop work" to the
 shared-interpreter architecture. Every one is built by `pyodex build`, loaded in real
 Chromium, and asserted by a harness level — they are checked artifacts, not prose.
@@ -404,6 +476,8 @@ Two notes that cost time and are worth inheriting: in `ui = "engine"` mode the w
 are painted by the per-tab **agent**, so a test (or a human) must look inside that
 agent's shadow root, not at the page; and `status()` is a no-op there because the
 interpreter has no local DOM — use a badge or a card for per-tab state.
+
+</details>
 
 ## Runtime tiers
 

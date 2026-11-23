@@ -1,0 +1,124 @@
+{
+ "schema_version": 1,
+ "diagram_type": "sequence",
+ "meta": {
+  "title": "A browser event reaching Python",
+  "output": "pyodex-event-sequence.html",
+  "viewBox": [
+   1020,
+   620
+  ],
+  "column_fit": "spread",
+  "animation": "trace",
+  "quality_profile": "showcase"
+ },
+ "participants": [
+  {
+   "id": "py",
+   "type": "backend",
+   "label": "Python",
+   "sublabel": "overlay handler"
+  },
+  {
+   "id": "chrome",
+   "type": "cloud",
+   "label": "chrome.storage",
+   "sublabel": "the API"
+  },
+  {
+   "id": "sw",
+   "type": "messagebus",
+   "label": "Service worker",
+   "sublabel": "bg.js listeners"
+  },
+  {
+   "id": "overlay",
+   "type": "frontend",
+   "label": "Overlay",
+   "sublabel": "runtime dispatch"
+  },
+  {
+   "id": "ui",
+   "type": "external",
+   "label": "Overlay card",
+   "sublabel": "what you see"
+  }
+ ],
+ "segments": [
+  {
+   "from": 150,
+   "to": 250,
+   "label": "Subscribe (build time)"
+  },
+  {
+   "from": 260,
+   "to": 400,
+   "label": "Event fires"
+  },
+  {
+   "from": 410,
+   "to": 520,
+   "label": "Dispatch in Python"
+  }
+ ],
+ "messages": [
+  {
+   "id": "m1",
+   "from": "py",
+   "to": "overlay",
+   "y": 160,
+   "label": "@chrome.on(\"storage.onChanged\")",
+   "variant": "default"
+  },
+  {
+   "id": "m2",
+   "from": "overlay",
+   "to": "sw",
+   "y": 205,
+   "label": "build wrote PYODEX_EVENTS",
+   "variant": "default"
+  },
+  {
+   "id": "m3",
+   "from": "py",
+   "to": "chrome",
+   "y": 275,
+   "label": "chrome.local.set(...)",
+   "variant": "emphasis"
+  },
+  {
+   "id": "m4",
+   "from": "chrome",
+   "to": "sw",
+   "y": 315,
+   "label": "onChanged fires",
+   "variant": "default"
+  },
+  {
+   "id": "m5",
+   "from": "sw",
+   "to": "overlay",
+   "y": 355,
+   "label": "sendMessage({kind:\"pyodex-event\"})",
+   "variant": "emphasis"
+  },
+  {
+   "id": "m6",
+   "from": "overlay",
+   "to": "py",
+   "y": 450,
+   "label": "dispatch \u2192 your function",
+   "variant": "default"
+  },
+  {
+   "id": "m7",
+   "from": "py",
+   "to": "ui",
+   "y": 495,
+   "label": "card.body.innerText",
+   "variant": "default"
+  }
+ ],
+ "activations": [],
+ "cards": []
+}

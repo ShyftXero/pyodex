@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="pyodex mark">
+  <title>pyodex mark</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b1b1f"/>
+      <stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="snake" x1="14" y1="52" x2="52" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e16867"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+  </defs>
+  <!-- extension-tile silhouette: rounded square with a puzzle notch on the top edge -->
+  <path d="M14 4h36a10 10 0 0 1 10 10v36a10 10 0 0 1-10 10H14A10 10 0 0 1 4 50V14A10 10 0 0 1 14 4Z"
+        fill="url(#tile)" stroke="#2f2f35" stroke-width="1.5"/>
+  <!-- the snake draws a "P" and escapes as a prompt caret -->
+  <path d="M22 52V22a6 6 0 0 1 6-6h9a8 8 0 0 1 0 16h-9"
+        fill="none" stroke="url(#snake)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- caret: the "code" half of the name, clear of the P's bowl -->
+  <path d="M37 41 45 47.5 37 54" fill="none" stroke="#f4f4f5" stroke-width="3.8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
