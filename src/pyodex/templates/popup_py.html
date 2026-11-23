@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{NAME}}</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; width: 320px; padding: 14px 16px;
+           font: 13px/1.5 system-ui, -apple-system, sans-serif; background: #0b0b0d; color: #f4f4f5; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    #status { color: #a1a1aa; }
+    #status.hidden { display: none; }
+    pre#error { display: none; margin: 10px 0 0; padding: 8px; max-height: 160px; overflow: auto;
+                background: #2a1215; color: #fecdd3; border-radius: 6px; white-space: pre-wrap;
+                font: 11px/1.4 ui-monospace, monospace; }
+    pre#error.visible { display: block; }
+  </style>
+</head>
+<body>
+  <h1>{{NAME}}</h1>
+  <div id="app"></div>
+  <div id="status">starting…</div>
+  <pre id="error"></pre>
+  <script type="module" src="bootstrap.js"></script>
+</body>
+</html>

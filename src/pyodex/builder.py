@@ -336,7 +336,8 @@ def _copy(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | None = None) -> dict:
+def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | None = None,
+              python_popup: bool = False) -> dict:
     m = {
         "manifest_version": 3,
         "name": cfg.name,
@@ -354,7 +355,9 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
         m["host_permissions"] = cfg.host_permissions
     if cfg.icon:
         m["icons"] = {"128": cfg.icon}
-    if cfg.cache and cfg.popup:
+    if python_popup:
+        m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
+    elif cfg.cache and cfg.popup:
         m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
     perms: list[str] = []
     if cfg.cache:
@@ -549,7 +552,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
                                                      {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
             resources += ["pagebridge.js", "pagemain.js"]
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
+                                 (project / "popup.py").is_file()), indent=2) + "\n")
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
@@ -599,7 +603,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
                 (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
             resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
+                                 (project / "popup.py").is_file()), indent=2) + "\n")
         print(f"built {runtime} tier ({cfg.slug})")
 
     if cfg.runtime == "rustpython":
@@ -697,6 +702,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     app = out / "app"
     app.mkdir()
     _copy(project / cfg.entry, app / "main.py")
+    python_popup = (project / "popup.py").is_file()
+    if python_popup:
+        _copy(project / "popup.py", app / "popup.py")
     for rel in cfg.python_files:
         _copy(project / rel, app / Path(rel).name)
     py_manifest = sorted(str(p.relative_to(app)) for p in app.rglob("*") if p.is_file())
@@ -715,6 +723,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     if cfg.cache:
         for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
             (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+        resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+    if python_popup:
+        # popup.py wins over the static cache popup: same interpreter, own page.
+        (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
+        if "popup.html" not in resources:
+            resources.append("popup.html")
     if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
             or cfg.engine == "shared" or cfg.ui == "engine"):
         # Rendered, not copied: the worker carries the runtime blob patterns and
@@ -785,7 +799,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append("runtime.json")
         print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
 
-    (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
+    (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
+                                 (project / "popup.py").is_file()), indent=2) + "\n")
     return out
 
 

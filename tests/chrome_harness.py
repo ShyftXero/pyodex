@@ -337,6 +337,8 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L24", "demo-11-popup", "", "demo 11: the toolbar popup runs popup.py", 24, ("primary",),
+          demo="11-popup"),
     Level("L23", "demo-10-network", "", "demo 10: declarativeNetRequest + webRequest", 23, ("primary",),
           demo="10-network"),
     Level("L22", "demo-09-toolbox", "", "demo 09: cookies, capture, downloads, bookmarks", 22, ("primary",),
@@ -1114,6 +1116,32 @@ def check_l23(level, ctx, env, c: Checks) -> None:
              f"text={frame_text(frame)[:200]!r}")
 
 
+def check_l24(level, ctx, env, c: Checks) -> None:
+    """Demo 11: popup.py is what renders the toolbar popup."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    origin = (frame.url or "").rsplit("/", 1)[0]
+    if not c.expect("extension origin derived", origin.startswith("chrome-extension://"), origin):
+        return
+
+    pop = ctx.new_page()
+    pop.goto(origin + "/popup.html")
+    status_text = wait_for(
+        lambda: pop.evaluate("() => document.getElementById('status')?.textContent || ''")
+        .replace("starting…", "") and pop.evaluate("() => document.getElementById('status')?.textContent || ''"),
+        90)
+    c.expect("popup rendered by Python", "popup rendered by Python" in (status_text or ""),
+             f"status={status_text!r}")
+    body = pop.evaluate("() => document.getElementById('app')?.textContent || ''")
+    c.expect("popup shows live data from chrome.tabs", "Tabs" in body and "Python" in body,
+             f"app={body[:120]!r}")
+    pop.close()
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1140,6 +1168,7 @@ CHECKS = {
     "L21": check_l21,
     "L22": check_l22,
     "L23": check_l23,
+    "L24": check_l24,
 }
 
 

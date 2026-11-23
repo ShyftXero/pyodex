@@ -174,8 +174,12 @@ async function boot() {
   heartbeat();
   setInterval(heartbeat, 30000); // keeps a busy-but-quiet overlay from being reaped
 
-  setStatus("Running main.py…");
-  await pyodide.runPythonAsync(await fetchText("app/main.py"));
+  // Inferred rather than injected: MV3's CSP forbids inline <script>, so the popup
+  // page cannot set a flag that way.
+  const entry = window.__PYODEX_ENTRY__ ||
+    (location.pathname.endsWith("/popup.html") ? "popup.py" : "main.py");
+  setStatus(`Running ${entry}…`);
+  await pyodide.runPythonAsync(await fetchText("app/" + entry));
 
   // Declarations only *declare*: this calls the functions whose @watch_for /
   // @on_event match the page, and registers the page-side subscriptions.

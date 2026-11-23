@@ -270,6 +270,8 @@ uv run pyodex init --list-demos
 | 08 | `08-setters` | alarms, context menus, notifications | `chrome.alarms`, `chrome.contextMenus`, `chrome.notifications` |
 | 09 | `09-toolbox` | cookies, screenshots, downloads, bookmarks | `chrome.cookies`, `chrome.tabs.capture_visible_tab`, `chrome.downloads` |
 | 10 | `10-network` | rules the browser enforces; traffic observation | `chrome.dnr`, `chrome.on("webRequest.*")` |
+| 11 | `11-popup` | the toolbar popup is Python | `popup.py` entry, inferred at boot |
+| — | `12-speech` | *planned:* offline speech-to-text in-browser | tracked in issue #3 (Cactus Whistle) |
 
 Demo 01 — the smallest thing that works:
 
