@@ -1270,6 +1270,9 @@ class WasmTrace:
             "host_calls": len(self.host_calls),
             "host_names": sorted({name for name, _a, _us in self.host_calls}),
             "total_us": round(sum(r[3] for r in self.records) + sum(h[2] for h in self.host_calls), 1),
+            # Browser timers are clamped (~100us, Spectre mitigation): call *counts* are
+            # exact, aggregate us is meaningful over many calls, a single-call us is not.
+            "timer_resolution_us": 100,
         }
 
     def report(self) -> str:
@@ -1279,6 +1282,8 @@ class WasmTrace:
             lines.append(f"  {name:14} {row['calls']:5}x {row['us']:9.1f}us")
         if s["host_names"]:
             lines.append("  host imports: " + ", ".join(s["host_names"]))
+        # Timers are clamped (~100us, Spectre): counts exact, single-call us is not.
+        lines.append(f"  (us clamped to ~{s['timer_resolution_us']}us buckets; counts are exact)")
         return "\n".join(lines)
 
     def __enter__(self) -> "WasmTrace":
