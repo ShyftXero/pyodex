@@ -21,16 +21,16 @@
 
 ```python
 # main.py — the whole extension
-from pyodex_runtime import Overlay, chrome
+from pyodex import Overlay, chrome, start
 
-ui = Overlay()
-ui.card("Hello").body.innerText = "from Python"
+@start                           # called when the extension page boots
+def main():
+    ui = Overlay()
+    ui.card("Hello").body.innerText = "from Python"
 
-@chrome.on("storage.onChanged")     # browser event -> Python function
-def changed(args):
-    ui.badge("storage moved")
-
-# `on(widget, "click")` is the other one: DOM events on your own UI.
+    @chrome.on("storage.onChanged")
+    def changed(_args):
+        ui.badge("storage moved")
 ```
 
 ```bash
@@ -41,6 +41,26 @@ uv add pyodex && uv run pyodex init my-ext && cd my-ext && uv run pyodex build .
 Write a Chrome (Manifest V3) extension in Python. `pyodex` scaffolds the project,
 bundles a local Pyodide runtime, resolves your Python dependencies for the
 wasm32 target, and emits a loadable unpacked extension.
+
+**Standard authoring is Python plus TOML.** Build UI with `Overlay` and `el`,
+work with the host page through `Page`, and handle events in Python. HTML and CSS
+are optional. You do not need to write JavaScript, wire messages between browser
+contexts, or install npm to build an app.
+
+In a Pyodide page (including an IWA), `from pyodex import ...` is the app API.
+Use `@start` for `main`, `document.element("id")` for required UI nodes, and
+`@on(button, "click")` for handlers. Ordinary `def` works; `async def` is optional.
+Use `prevent_default=True` to cancel form navigation synchronously. A plugin can
+use `@blocking` on an async implementation to expose an ordinary return value
+inside a JSPI-capable `@start` or `@on` call. This suspends the Python call, not
+the browser. Existing `pyodex_runtime` imports still work.
+
+When a plugin needs an existing browser library or worker, declare its files in
+`assets` and use `import_js_module`, `asset_url`, and `worker_script_url` from
+`pyodex`. The plugin’s logic and dependencies belong to the project, not
+the framework. [Demo 17](examples/experimental/17-ssh/) shows this pattern with
+Secure Shell. Handwritten `scripts` remain an advanced escape hatch; the historical
+[Wasm canvas demo](examples/demos/13-doomlike/) explicitly uses its own JS runner.
 
 ## Four steps, one column of code
 
@@ -1066,16 +1086,25 @@ sideloading:
 
 ```
 uv run pyodex iwa build examples/fireworks     # dist/iwa/<slug>/ + instructions
-uv run pyodex iwa dev examples/fireworks       # HTTPS dev server for chrome://web-app-internals
+uv run pyodex iwa dev examples/fireworks       # HTTP dev server on loopback
 ```
 
-Sideload with developer flags (Method 1): enable `#enable-isolated-web-apps` and
-`#enable-isolated-web-app-dev-mode`, open `chrome://web-app-internals`, and pick
-*Install IWA with Dev Mode Proxy* pointing at the `pyodex iwa dev` URL.
+Enable `#enable-isolated-web-apps` and `#enable-isolated-web-app-dev-mode`, then
+open `chrome://iwa-dev` (older Chrome: `chrome://web-app-internals`) and install a
+*Dev Mode Proxy* using the printed URL. Add `--direct-sockets` to opt in to the
+manifest policies for TCP/UDP and local network access. Chrome still controls API
+availability and permissions.
 
-Experimental by design: no signing, no update channel, no enterprise policy.
-An extension cannot reach Direct Sockets today; this target exists so the code
-path is ready if that changes, and so you can run it as a standalone IWA now.
+The IWA target requires bundled Pyodide and runs without extension APIs or a host
+tab. Distribution (signing, updates, deployment) is not implemented. In a realm
+where Chrome exposes `TCPSocket`, pyodex's Python `socket` shim can use it for
+plain TCP; ordinary extensions still use the WebSocket relay unless their browser
+actually exposes that API. TLS through the `ssl` shim still needs the relay.
+
+[Demo 17: SSH over Direct Sockets](examples/experimental/17-ssh/) is an example
+plugin, not a pyodex integration. The demo owns its Python plugin and its copy of
+Google’s Secure Shell 0.82 OpenSSH build, WASI glue, and notices. The example lives
+in this checkout, not in the pyodex wheel or source distribution.
 
 ## Tests
 

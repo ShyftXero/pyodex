@@ -95,6 +95,7 @@ def _app_ctx(cfg: ExtConfig, *, page: str = "overlay.html", scripts: str = "") -
         "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
         "OVERLAY_PAGE": page, "DEV": "true" if cfg.dev else "false", "SCRIPTS": scripts,
         "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
+        "BUNDLED_ASSETS": json.dumps(cfg.assets),
         "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
         "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
     }
@@ -335,7 +336,7 @@ class ExtConfig:
     matches: list[str] = field(default_factory=lambda: ["<all_urls>"])
     entry: str = "main.py"
     python_files: list[str] = field(default_factory=list)  # extra .py files / packages
-    scripts: list[str] = field(default_factory=list)  # classic JS loaded in overlay before Python
+    scripts: list[str] = field(default_factory=list)  # optional escape hatch: run app-authored JS
     assets: list[str] = field(default_factory=list)  # extra files copied verbatim
     vendor: dict[str, str] = field(default_factory=dict)  # filename -> URL
     pyodide_version: str = PYODIDE_VERSION
@@ -700,8 +701,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     # Only what is always emitted. Everything else registers itself in _emit_*(), so a
     # name here can never point at a file this build skipped — the engine files used to be
     # listed unconditionally, which lit up the invariant test as "registered but absent".
-    resources: list[str] = ["bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
-                            "pyodide/*", "app/*", "wheels/*"]
+    resources: list[str] = ["bootstrap.js", "pyodide/*", "app/*", "wheels/*"]
 
     def _mp_build() -> None:
         """MicroPython tier: vendored wasm, its own bootstrap, tiny shim."""
@@ -862,9 +862,10 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         _copy(project / rel, out / rel)
         resources.append(rel)
 
-    # 5. Runtime helper (python)
-    shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
-    shutil.copy2(RUNTIME / "pyodex_natural.py", out / "pyodex_natural.py")
+    # 5. Runtime helpers (Python)
+    for helper in ("pyodex.py", "pyodex_runtime.py", "pyodex_natural.py"):
+        shutil.copy2(RUNTIME / helper, out / helper)
+        resources.append(helper)
     _emit_cache_surface(out, cfg, resources)
     if python_popup:
         # popup.py wins over the static cache popup: same interpreter, own page.

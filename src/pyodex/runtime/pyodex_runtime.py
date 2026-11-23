@@ -99,6 +99,27 @@ def _camel(s: str) -> str:
     return head + "".join(w.title() for w in rest)
 
 
+def asset_url(path: str) -> str:
+    """Resolve an app file listed in ``[extension].assets`` in the current package."""
+    from _pyodex_assets import assetURL
+
+    return str(assetURL(path))
+
+
+async def import_js_module(path: str) -> Any:
+    """Import a bundled ES module from Python, without a handwritten script tag or loader."""
+    from _pyodex_assets import importModule
+
+    return await importModule(path)
+
+
+def worker_script_url(path: str) -> Any:
+    """Resolve a declared worker script, using Trusted Types where the browser requires it."""
+    from _pyodex_assets import workerScriptURL
+
+    return workerScriptURL(path)
+
+
 def status(text: str | None, error: bool = False) -> None:
     """Show/hide the built-in bottom-right status pill. `None` hides it.
 

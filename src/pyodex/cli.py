@@ -115,11 +115,13 @@ def _cmd_iwa(args: argparse.Namespace) -> int:
 
     target = Path(args.dir).resolve()
     if args.action == "build":
-        out = iwa.build_iwa(target, Path(args.out).resolve() if args.out else None)
+        out = iwa.build_iwa(target, Path(args.out).resolve() if args.out else None,
+                            direct_sockets=args.direct_sockets)
         print(f"built IWA at {out}")
-        print("serve it with: pyodex iwa dev " + str(target))
+        flag = " --direct-sockets" if args.direct_sockets else ""
+        print(f"serve it with: pyodex iwa dev {target}{flag}")
         return 0
-    iwa.dev(target, port=args.port)
+    iwa.dev(target, port=args.port, direct_sockets=args.direct_sockets)
     return 0
 
 
@@ -206,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("action", choices=["build", "dev"])
     s.add_argument("dir")
     s.add_argument("--out")
-    s.add_argument("--port", type=int, default=0, help="for dev: HTTPS port (default: random)")
+    s.add_argument("--port", type=int, default=0, help="for dev: loopback port (default: random)")
+    s.add_argument("--direct-sockets", action="store_true", help="allow Direct Sockets in the IWA")
     s.set_defaults(fn=_cmd_iwa)
 
     s = sub.add_parser("cache", help="inspect / prune the wheel store")

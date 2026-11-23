@@ -15,11 +15,9 @@ from __future__ import annotations
 
 import json
 import shutil
-import socket
-import ssl
-import subprocess
 import threading
 from functools import partial
+from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -34,16 +32,16 @@ Install with developer flags (no signing, no policy):
      #enable-isolated-web-apps          -> Enabled
      #enable-isolated-web-app-dev-mode -> Enabled
    Restart Chrome.
-2. Serve this directory over HTTPS:
+2. Start a loopback dev server:
      uv run pyodex iwa dev <your project>
-3. chrome://web-app-internals -> "Install IWA with Dev Mode Proxy"
-     URL: the https://127.0.0.1:PORT/ URL printed by step 2.
+3. Open chrome://iwa-dev (older Chrome: chrome://web-app-internals) and
+   install a Dev Mode Proxy using the http://127.0.0.1:PORT/ URL from step 2.
 
 What this gives you
 -------------------
 * A standalone `isolated-app://` window running the same Python app.
-* Direct Sockets (TCPSocket / UDPSocket / TCPServerSocket) where the browser
-  exposes them, so plain TCP/UDP without the local proxy.
+* With --direct-sockets, the manifest opts in to Direct Sockets and local
+  network access. Chrome still decides which capabilities are available.
 
 What this does NOT give you
 ---------------------------
@@ -79,15 +77,29 @@ class _Handler(SimpleHTTPRequestHandler):
         print(f"  [iwa] {self.address_string()} {fmt % args}")
 
 
-def _iwa_index(name: str, css: str, body: str, scripts: list[str]) -> str:
-    tags = "\n".join(f'  <script src="{s}"></script>' for s in scripts)
+def _iwa_index(name: str, body: str, scripts: list[str]) -> str:
+    tags = "\n".join(f'  <script src="{escape(s, quote=True)}"></script>' for s in scripts)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>{name}</title>
-  <link rel="manifest" href="manifest.webmanifest" />
-  <style>
+  <title>{escape(name)}</title>
+  <link rel="manifest" href="/.well-known/manifest.webmanifest" />
+  <link rel="stylesheet" href="iwa.css" />
+</head>
+<body>
+{body}
+  <div id="pyodex-status">Loading Python…</div>
+  <pre id="pyodex-error"></pre>
+{tags}
+  <script type="module" src="bootstrap.js"></script>
+</body>
+</html>
+"""
+
+
+def _iwa_css(css: str) -> str:
+    return f"""
     html, body {{ margin: 0; padding: 0; height: 100%; background: #0b0b0d; color: #fafafa;
                  font: 14px/1.4 system-ui, sans-serif; }}
     #pyodex-status {{ position: fixed; bottom: 8px; right: 8px; z-index: 2147483647;
@@ -101,22 +113,14 @@ def _iwa_index(name: str, css: str, body: str, scripts: list[str]) -> str:
       white-space: pre-wrap; display: none; }}
     #pyodex-error.show {{ display: block; }}
     {css}
-  </style>
-</head>
-<body>
-{body}
-  <div id="pyodex-status">Loading Python…</div>
-  <pre id="pyodex-error"></pre>
-{tags}
-  <script type="module" src="bootstrap.js"></script>
-</body>
-</html>
 """
 
 
-def build_iwa(target: Path, out: Path | None = None) -> Path:
-    """Build an IWA-shaped app directory from an extension project."""
+def build_iwa(target: Path, out: Path | None = None, *, direct_sockets: bool = False) -> Path:
+    """Build a dev-installable IWA from a project with bundled Pyodide."""
     project, cfg = resolve_project(target)
+    if cfg.runtime not in ("", "pyodide") or cfg.runtime_base != "bundled":
+        raise ValueError("IWA builds require the bundled Pyodide runtime")
     base = build_extension(target)
     out = out or (project / "dist" / "iwa" / cfg.slug)
     if out.exists():
@@ -129,9 +133,18 @@ def build_iwa(target: Path, out: Path | None = None) -> Path:
     css = cfg.overlay_css or (css_file.read_text() if css_file.exists() else "")
     body_file = project / "overlay.body.html"
     body = cfg.overlay_body or (body_file.read_text() if body_file.exists() else "")
-    (out / "index.html").write_text(_iwa_index(cfg.name, css, body, cfg.scripts))
-
-    (out / "manifest.webmanifest").write_text(json.dumps({
+    (out / "index.html").write_text(_iwa_index(cfg.name, body, cfg.scripts))
+    (out / "iwa.css").write_text(_iwa_css(css))
+    (out / "iwa-icon.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">'
+        '<rect width="192" height="192" rx="32" fill="#18181b"/>'
+        '<path d="m48 58 42 38-42 38m54 0h42" fill="none" stroke="#f43f5e" '
+        'stroke-linecap="round" stroke-linejoin="round" stroke-width="12"/></svg>\n'
+    )
+    (out / ".well-known").mkdir()
+    (out / ".well-known" / "manifest.webmanifest").write_text(json.dumps({
+        "id": "/",
+        "version": json.loads((out / "manifest.json").read_text())["version"],
         "name": cfg.name,
         "short_name": cfg.slug,
         "description": cfg.description,
@@ -141,53 +154,38 @@ def build_iwa(target: Path, out: Path | None = None) -> Path:
         "display_override": ["window-controls-overlay", "standalone"],
         "background_color": "#0b0b0d",
         "theme_color": "#0b0b0d",
-        **({"icons": [{"src": cfg.icon, "sizes": "128x128", "type": "image/png"}]} if cfg.icon else {}),
+        "icons": [{"src": "/iwa-icon.svg", "sizes": "any", "type": "image/svg+xml"}],
+        "permissions_policy": {
+            "cross-origin-isolated": ["self"],
+            **({feature: ["self"] for feature in (
+                "direct-sockets", "local-network", "loopback-network",
+            )} if direct_sockets else {}),
+        },
     }, indent=2) + "\n")
 
     (out / "IWA-INSTALL.txt").write_text(IWA_NOTES)
     return out
 
 
-def _make_cert(dirpath: Path) -> tuple[Path, Path]:
-    cert, key = dirpath / "iwa-cert.pem", dirpath / "iwa-key.pem"
-    subprocess.run(
-        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key),
-         "-out", str(cert), "-days", "2", "-subj", "/CN=127.0.0.1",
-         "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"],
-        check=True, capture_output=True,
-    )
-    return cert, key
-
-
-def serve_iwa(built: Path, *, port: int = 0, host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    """Serve an IWA build over HTTPS (self-signed). Returns the running server."""
-    certdir = built.parent / ".certs"
-    certdir.mkdir(exist_ok=True)
-    cert, key = certdir / "iwa-cert.pem", certdir / "iwa-key.pem"
-    if not (cert.exists() and key.exists()):
-        cert, key = _make_cert(certdir)
-
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(cert, key)
+def serve_iwa(built: Path, *, port: int = 0) -> ThreadingHTTPServer:
+    """Serve the IWA to Chrome's dev proxy over loopback HTTP only."""
     handler = partial(_Handler, directory=str(built))
-    srv = ThreadingHTTPServer((host, port), handler)
-    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
 
-def dev(project: Path, *, port: int = 0) -> str:
+def dev(project: Path, *, port: int = 0, direct_sockets: bool = False) -> str:
     """Build, serve, and print sideload instructions. Returns the URL."""
-    built = build_iwa(project)
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        free = s.getsockname()[1]
-    srv = serve_iwa(built, port=port or free)
-    url = f"https://127.0.0.1:{srv.server_address[1]}/"
-    print(f"serving {built} at {url}")
-    print(IWA_NOTES)
-    try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        srv.shutdown()
+    built = build_iwa(project, direct_sockets=direct_sockets)
+    with serve_iwa(built, port=port) as srv:
+        url = f"http://127.0.0.1:{srv.server_port}/"
+        print(f"serving {built} at {url}")
+        print(IWA_NOTES, flush=True)
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            srv.shutdown()
     return url

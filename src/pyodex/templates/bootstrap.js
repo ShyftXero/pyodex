@@ -41,8 +41,34 @@ function showError(err, context = "error") {
   setStatus(`${context}: ${(err?.message || String(err)).split("\n")[0]}`, true);
 }
 
+const extensionRuntime = globalThis.chrome?.runtime;
+const assetURL = (rel) => new URL(rel, import.meta.url).href;
+const bundledAssets = new Set({{BUNDLED_ASSETS}});
+let workerPolicy;
+
+function bundledAssetURL(rel) {
+  if (!bundledAssets.has(rel) || !/^[\w./-]+$/.test(rel) ||
+      rel.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error(`Declare a package-relative file in [extension].assets: ${rel}`);
+  }
+  return assetURL(rel);
+}
+
+function bundledModuleURL(rel) {
+  if (!/\.m?js$/.test(rel)) throw new Error(`Expected a bundled JavaScript module: ${rel}`);
+  return bundledAssetURL(rel);
+}
+
+function workerScriptURL(rel) {
+  if (!globalThis.trustedTypes) return bundledModuleURL(rel);
+  workerPolicy ??= trustedTypes.createPolicy("pyodex-packaged-worker", {
+    createScriptURL: bundledModuleURL,
+  });
+  return workerPolicy.createScriptURL(rel);
+}
+
 async function fetchText(rel) {
-  const r = await fetch(chrome.runtime.getURL(rel));
+  const r = await fetch(assetURL(rel));
   if (!r.ok) throw new Error(`fetch ${rel}: ${r.status}`);
   return r.text();
 }
@@ -124,14 +150,21 @@ async function remoteRuntime() {
 }
 
 async function boot() {
-  const indexURL = REMOTE_RUNTIME ? await remoteRuntime() : chrome.runtime.getURL("pyodide/");
+  const indexURL = REMOTE_RUNTIME ? await remoteRuntime() : assetURL("pyodide/");
   const { loadPyodide } = await import("./pyodide/pyodide.mjs");
   const pyodide = await loadPyodide({ indexURL });
   window.pyodide = pyodide;
 
-  // Runtime helper importable as `pyodex_runtime`.
-  pyodide.FS.writeFile("/home/pyodide/pyodex_runtime.py", await fetchText("pyodex_runtime.py"));
-  pyodide.FS.writeFile("/home/pyodide/pyodex_natural.py", await fetchText("pyodex_natural.py"));
+  // The app-facing module is `pyodex`; keep the original runtime name for older apps.
+  for (const file of ["pyodex.py", "pyodex_runtime.py", "pyodex_natural.py"]) {
+    pyodide.FS.writeFile("/home/pyodide/" + file, await fetchText(file));
+  }
+
+  pyodide.registerJsModule("_pyodex_assets", {
+    assetURL: bundledAssetURL,
+    importModule: (rel) => import(bundledModuleURL(rel)),
+    workerScriptURL,
+  });
 
   // App files -> /home/pyodide/app, on sys.path so `main.py` can import siblings.
   const files = JSON.parse(await fetchText("app/files.json"));
@@ -153,7 +186,7 @@ async function boot() {
     setStatus("Installing packages…");
     // loadPackage accepts wheel URLs and handles wasm32 wheels with shared libs
     // (numpy etc.) as well as pure-Python ones.
-    await pyodide.loadPackage(idx.wheels.map((w) => chrome.runtime.getURL("wheels/" + w)), {
+    await pyodide.loadPackage(idx.wheels.map((w) => assetURL("wheels/" + w)), {
       messageCallback: () => {},
     });
   }
@@ -181,12 +214,20 @@ async function boot() {
     location.pathname.endsWith("/sidepanel.html") ? "panel.py" : "main.py");
   setStatus(`Running ${entry}…`);
   await pyodide.runPythonAsync(await fetchText("app/" + entry));
+  await pyodide.runPythonAsync(`
+import sys as _pyodex_sys
+_pyodex_api = _pyodex_sys.modules.get("pyodex")
+if _pyodex_api is not None:
+    await _pyodex_api._run_start()
+`);
 
-  // Declarations only *declare*: this calls the functions whose @watch_for /
-  // @on_event match the page, and registers the page-side subscriptions.
-  await pyodide.runPythonAsync(
-    "import asyncio, pyodex_runtime; asyncio.ensure_future(pyodex_runtime.dispatch())"
-  );
+  // Page declarations need the extension's content-script bridge. An IWA
+  // runs standalone, with no host tab or extension runtime.
+  if (extensionRuntime?.getURL) {
+    await pyodide.runPythonAsync(
+      "import asyncio, pyodex_runtime; asyncio.ensure_future(pyodex_runtime.dispatch())"
+    );
+  }
   status?.classList.add("hidden");
 }
 

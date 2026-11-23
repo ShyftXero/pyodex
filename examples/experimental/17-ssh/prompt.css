@@ -1,0 +1,31 @@
+#pyodex-ssh-prompt {
+  color-scheme: dark;
+  color: #f5f7fa;
+  background: #171b23;
+  border: 1px solid #535967;
+  border-radius: 8px;
+  max-width: min(480px, 85vw);
+  padding: 20px;
+}
+#pyodex-ssh-prompt::backdrop { background: rgba(0, 0, 0, .75); }
+#pyodex-ssh-prompt h2 { margin: 0; font-weight: 650; }
+#pyodex-ssh-prompt .pyodex-ssh-target { color: #bfc4cf; }
+#pyodex-ssh-prompt-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+#pyodex-ssh-prompt label { display: grid; gap: 4px; }
+#pyodex-ssh-prompt input, #pyodex-ssh-prompt button {
+  min-height: 44px;
+  border: 1px solid #535967;
+  border-radius: 6px;
+  background: #171b23;
+  color: #f5f7fa;
+  font: inherit;
+  padding: 8px 12px;
+}
+#pyodex-ssh-prompt :focus-visible { outline: 2px solid #b8f6d8; outline-offset: 2px; }
+#pyodex-ssh-prompt .pyodex-ssh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}

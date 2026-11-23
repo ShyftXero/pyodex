@@ -11,25 +11,23 @@ description = "A Python-powered Chrome extension."
 matches = {matches}
 entry = "main.py"
 # url_filter = "example"          # optional: only run when page URL contains this
-# scripts = ["vendor.js"]         # classic JS loaded in overlay before Python
 # python_files = ["helpers.py"]   # extra Python files / packages copied to app/
 # assets = ["icon.png"]
-
-[vendor]
-# filename = "https://cdn.example.com/lib.umd.js"
 '''
 
 MAIN_PY = '''"""Entry point. Runs inside Pyodide in the extension overlay iframe."""
 
-from pyodex_runtime import Overlay, on
-
-ui = Overlay()
-btn = ui.button("Hello from Python", top=16, left=16)
+from pyodex import Overlay, on, start
 
 
-@on(btn, "click")
-def clicked(event):
-    btn.innerText = "Clicked!"
+@start
+def main():
+    ui = Overlay()
+    btn = ui.button("Hello from Python", top=16, left=16)
+
+    @on(btn, "click")
+    def clicked(_event):
+        btn.innerText = "Clicked!"
 '''
 
 OVERLAY_CSS = """/* Styles for the overlay page. Overlay body is click-through unless an element sets pointer-events: auto. */

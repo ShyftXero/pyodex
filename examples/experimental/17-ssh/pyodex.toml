@@ -1,0 +1,24 @@
+[extension]
+name = "Demo 17 SSH over Direct Sockets"
+description = "OpenSSH in a browser worker, driven by Python, with no TCP relay."
+boot = "user"
+http = false
+python_files = ["secure_shell_plugin.py"]
+assets = [
+    "prompt.css",
+    "vendor/hterm/index.js",
+    "vendor/js/deps_indexeddb-fs.rollup.js",
+    "vendor/libdot/index.js",
+    "vendor/plugin/wasm/ssh.wasm",
+    "vendor/wasi-js-bindings/index.js",
+    "vendor/wassh/js/chrome_net_error_list.js",
+    "vendor/wassh/js/constants.js",
+    "vendor/wassh/js/process.js",
+    "vendor/wassh/js/sockets.js",
+    "vendor/wassh/js/syscall_entry.js",
+    "vendor/wassh/js/syscall_handler.js",
+    "vendor/wassh/js/vfs.js",
+    "vendor/wassh/js/worker.js",
+    "vendor/LICENSE-libapps",
+    "vendor/secure-shell-notices.txt",
+]

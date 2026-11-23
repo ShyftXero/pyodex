@@ -5,9 +5,9 @@ each shim checks the capability it needs and leaves stdlib untouched if absent.
 
 What it does (when the runtime allows it):
 
-  socket        sync `socket.socket()` / connect / send / recv over the
-                python_websocket_proxy bridge, using JSPI `run_sync` so plain
-                blocking code works (redis-py, smtplib, http.client, ...).
+  socket        sync `socket.socket()` / connect / send / recv using JSPI:
+                Chrome Direct Sockets for plain TCP where available, otherwise
+                the python_websocket_proxy bridge.
   ssl           `wrap_socket` routes through the proxy's /tls/HOST/PORT path
                 (proxy terminates TLS; browser cannot do raw TLS).
   input()       `window.prompt`;   getpass.getpass()  -> prompt too.
@@ -159,14 +159,29 @@ def _await(promise: Any) -> Any:
         raise OSError(msg) from None
 
 
+def _observe_promise(promise: Any, resolve: Any, reject: Any) -> None:
+    """Observe one JS promise and release both callback proxies at settlement."""
+    def settle(callback: Any, value: Any) -> None:
+        try:
+            callback(value)
+        finally:
+            for proxy in proxies:
+                proxy.destroy()
+
+    proxies = [create_proxy(lambda value: settle(resolve, value)),
+               create_proxy(lambda error: settle(reject, error))]
+    promise.then(*proxies)
+
+
 class _ProxySocket:
-    """Minimal socket.socket replacement backed by a WebSocket to the proxy."""
+    """Minimal socket.socket replacement for browser TCP (direct or relayed)."""
 
     family = 2  # AF_INET
     type = 1  # SOCK_STREAM
     proto = 0
 
     def __init__(self, family: int = 2, type: int = 1, proto: int = 0, fileno: Any = None) -> None:
+        self.family, self.type, self.proto = family, type, proto
         self._ws: Any = None
         self._buf = bytearray()
         self._chunks: list[bytes | None] = []
@@ -176,6 +191,13 @@ class _ProxySocket:
         self._tls = False
         self._peer: tuple[str, int] | None = None
         self._proxies: list[Any] = []
+        # Direct Sockets transport (Chrome TCPSocket), set when that route is taken.
+        self._sock: Any = None
+        self._reader: Any = None
+        self._writer: Any = None
+        self._read_pending = False
+        self._read_error: OSError | None = None
+        self._eof = False
 
     # -- connection -------------------------------------------------------- #
     def _url(self, host: str, port: int) -> str:
@@ -189,6 +211,11 @@ class _ProxySocket:
         import time as _time
 
         host, port = address
+        # Feature-detect TCP in this realm (UDP alone does not qualify). A denied
+        # direct connection must not retry via a relay. TLS uses its existing route.
+        if self.type == 1 and not self._tls and hasattr(js, "TCPSocket"):
+            self._connect_direct(host, int(port))
+            return
         self._peer = (host, int(port))
         ws = js.WebSocket.new(self._url(host, int(port)))
         ws.binaryType = "arraybuffer"
@@ -217,6 +244,75 @@ class _ProxySocket:
             return 0
         except OSError as e:
             return e.errno or 111
+
+    def _wait_direct(self, promise: Any) -> Any:
+        """Wait for a stream operation without spinning or dropping rejections."""
+        import time as _time
+
+        result: list[Any] = []
+        errors: list[Any] = []
+        _observe_promise(promise, result.append, errors.append)
+        deadline = None if self._timeout is None else _time.monotonic() + self._timeout
+        while not result and not errors:
+            if self._closed:
+                raise OSError(9, "Bad file descriptor")
+            delay = 0.004 if deadline is None else min(0.004, deadline - _time.monotonic())
+            if delay <= 0:
+                raise TimeoutError(110, "timed out")
+            _time.sleep(delay)
+        if errors:
+            raise OSError(str(errors[0]))
+        return result[0]
+
+    def _require_direct_blocking(self) -> None:
+        if not can_run_sync():
+            raise OSError("Direct Sockets requires a JSPI-enabled Python context")
+        if self._timeout == 0:
+            raise OSError(95, "Nonblocking Direct Sockets is not supported")
+
+    def _connect_direct(self, host: str, port: int) -> None:
+        self._require_direct_blocking()
+        self._peer = (host, port)
+        self._gen = getattr(self, "_gen", 0) + 1
+        try:
+            self._sock = js.TCPSocket.new(host, port)
+            # Chrome reports failures on both opened and closed.
+            _observe_promise(self._sock.closed, lambda _value: None, lambda _error: None)
+            info = self._wait_direct(self._sock.opened)
+            self._reader = info.readable.getReader()
+            self._writer = info.writable.getWriter()
+            self._read_direct()
+        except Exception as exc:
+            self.close()
+            if isinstance(exc, OSError):
+                raise
+            raise OSError(str(exc)) from exc
+
+    def _read_direct(self) -> None:
+        # One read ahead for select(), without buffering the peer's entire stream.
+        if self._read_pending or self._eof or self._read_error or self._chunks:
+            return
+        self._read_pending = True
+        gen = self._gen
+
+        def read(result: Any) -> None:
+            if gen != self._gen:
+                return
+            self._read_pending = False
+            if result.done:
+                self._eof = True
+            else:
+                self._chunks.append(bytes(result.value.to_py()))
+            self._wake()
+
+        def failed(error: Any) -> None:
+            if gen != self._gen:
+                return
+            self._read_pending = False
+            self._read_error = OSError(str(error))
+            self._wake()
+
+        _observe_promise(self._reader.read(), read, failed)
 
     def _wire(self, ws: Any, state: dict, gen: int) -> None:
         stale = lambda: gen != getattr(self, "_gen", 0)  # noqa: E731
@@ -261,11 +357,12 @@ class _ProxySocket:
         """
         import time as _time
 
-        if self._chunks:
-            return
+        if self._sock is not None:
+            self._require_direct_blocking()
+            self._read_direct()
         deadline = None if self._timeout is None else _time.monotonic() + self._timeout
         while not self._chunks:
-            if self._closed:
+            if self._closed or self._eof or self._read_error:
                 return
             if deadline is None:
                 _time.sleep(0.004)
@@ -277,7 +374,18 @@ class _ProxySocket:
 
     # -- io ---------------------------------------------------------------- #
     def send(self, data: bytes, flags: int = 0) -> int:
-        if self._closed or self._ws is None:
+        if self._closed:
+            raise OSError(9, "Bad file descriptor")
+        if self._sock is not None:
+            self._require_direct_blocking()
+            try:
+                self._wait_direct(self._writer.write(to_js(bytes(data))))
+            except OSError:
+                # A timed-out write may still have sent some data. Do not reuse it.
+                self.close()
+                raise
+            return len(data)
+        if self._ws is None:
             raise OSError(9, "Bad file descriptor")
         # to_js(bytes) yields a Uint8Array; avoids a per-element Python list.
         self._ws.send(to_js(bytes(data)))
@@ -287,12 +395,21 @@ class _ProxySocket:
         self.send(data)
 
     def recv(self, bufsize: int, flags: int = 0) -> bytes:
+        if bufsize == 0:
+            return b""
         while not self._buf:
             if self._chunks:
                 c = self._chunks.pop(0)
                 if c is None:
+                    self._eof = True
                     return b""
                 self._buf.extend(c)
+                if self._sock is not None and not self._closed:
+                    self._read_direct()
+            elif self._read_error:
+                raise self._read_error
+            elif self._closed or self._eof:
+                return b""
             else:
                 self._wait_data()
         out = bytes(self._buf[:bufsize])
@@ -341,7 +458,7 @@ class _ProxySocket:
 
     # -- readiness (select) ------------------------------------------------ #
     def _readable(self) -> bool:
-        return bool(self._buf or self._chunks)
+        return bool(self._buf or self._chunks or self._eof or self._read_error)
 
     # -- misc -------------------------------------------------------------- #
     def settimeout(self, t: float | None) -> None:
@@ -372,8 +489,17 @@ class _ProxySocket:
         pass
 
     def close(self) -> None:
-        if not self._closed and self._ws is not None:
-            self._closed = True
+        if self._closed:
+            return
+        self._closed = True
+        if self._sock is not None:
+            self._gen += 1  # Closing the lock rejects any outstanding read.
+            for stream in (self._reader, self._writer):
+                if stream is not None:
+                    stream.releaseLock()
+            self._reader = self._writer = None
+            _observe_promise(self._sock.close(), lambda _value: None, lambda _error: None)
+        elif self._ws is not None:
             self._ws.close()
 
     def detach(self) -> int:
@@ -396,11 +522,13 @@ class _ProxySocket:
             return self
         self._tls = True
         self._tls_host = server_hostname
-        if self._ws is not None and self._peer is not None:
+        # TCPSocket is plain TCP, so a TLS upgrade drops off the direct route and
+        # reconnects through the proxy's /tls path (which terminates TLS).
+        if (self._ws is not None or self._sock is not None) and self._peer is not None:
             peer = self._peer
             self.close()
-            self._closed = False
-            self._ws = None
+            self._closed = self._eof = self._read_pending = False
+            self._ws = self._sock = self._read_error = None
             self._chunks.clear()
             self._buf.clear()
             self.connect(peer)

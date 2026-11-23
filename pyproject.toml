@@ -19,6 +19,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyodex"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["/examples/experimental/17-ssh", "/tests/iwa_ssh_smoke.py"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.6",
