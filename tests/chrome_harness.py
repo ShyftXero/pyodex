@@ -337,6 +337,10 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L27", "demo-14-instrumented", "", "demo 14: full wasm instrumentation from Python", 27, ("primary",),
+          demo="14-instrumented"),
+    Level("L26", "demo-13-doomlike", "", "demo 13: wasm paints a canvas in the host page", 26, ("primary",),
+          demo="13-doomlike"),
     Level("L25", "demo-12-wasm", "", "demo 12: a wasm module driven from Python", 25, ("primary",),
           demo="12-wasm"),
     Level("L24", "demo-11-popup", "", "demo 11: the toolbar popup runs popup.py", 24, ("primary",),
@@ -1193,6 +1197,59 @@ def check_l25(level, ctx, env, c: Checks) -> None:
              f"text={(text or '')[:300]!r}")
 
 
+def check_l26(level, ctx, env, c: Checks) -> None:
+    """Demo 13: a wasm module paints a canvas inside the page (the acknowledged cheat)."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#run-btn")
+    text = wait_for(lambda: "canvas:" in frame_text(frame) and frame_text(frame), 90)
+    if not c.expect("page canvas painted", bool(text), f"text={frame_text(frame)[:300]!r}"):
+        return
+    print(f"    doomlike -> {text!r}")
+    frames = page.evaluate("() => document.getElementById('pyodex-canvas')?.dataset.frames || ''")
+    c.expect("frames rendered", frames not in ("", "0"), f"data-frames={frames!r}")
+    checksum = page.evaluate("() => document.getElementById('pyodex-canvas')?.dataset.checksum || ''")
+    c.expect("pixels came from wasm", checksum not in ("", "0"), f"checksum={checksum!r}")
+    painted = page.evaluate("""() => {
+        const c = document.getElementById('pyodex-canvas');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let nz = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] || d[i + 1] || d[i + 2]) nz++;
+        return nz;
+    }""")
+    c.expect("canvas is not blank", painted > 1000, f"non-black pixels={painted}")
+    c.expect("the demo states the cheat", "cheat" in (page.evaluate(
+        "() => document.body.innerText") or "") or "borrow" in (text or ""),
+        "the demo must say it borrows the page canvas")
+
+
+def check_l27(level, ctx, env, c: Checks) -> None:
+    """Demo 14: exports traced with timings, imports hosted in Python."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#run-btn")
+    text = wait_for(lambda: "exports=" in frame_text(frame) and frame_text(frame), 120)
+    if not c.expect("trace produced a report", bool(text), f"text={frame_text(frame)[:300]!r}"):
+        return
+    print(f"    instrumented -> {text!r}")
+    c.expect("every export call recorded", "exports=21" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("host import observed from Python", "host=1" in (text or "") and "[42]" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("per-export timings listed", "add " in (text or "") or "color" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("pixel throughput measured", "pixels: 19200 calls" in (text or ""),
+             f"text={(text or '')[-300:]!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1221,6 +1278,8 @@ CHECKS = {
     "L23": check_l23,
     "L24": check_l24,
     "L25": check_l25,
+    "L26": check_l26,
+    "L27": check_l27,
 }
 
 

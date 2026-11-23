@@ -1,0 +1,8 @@
+[extension]
+name = "Demo 13 Doomlike"
+version = ""
+description = "wasm paints a canvas in the host page. Cheating: it borrows the page's canvas (see README)."
+matches = ["<all_urls>"]
+boot = "user"
+http = false
+assets = ["wasmcanvas.js", "color.wasm"]

@@ -730,6 +730,14 @@ class Page:
     async def set_html(self, sel: str, value: str, index: int = 0) -> None:
         await self.dom("set_html", sel, value=value, index=index)
 
+    async def append_html(self, sel: str, value: str, index: int = 0) -> None:
+        """Add nodes to the page without replacing its content.
+
+        `set_html` is destructive; a demo that wants a canvas next to the page it is
+        analysing needs this instead.
+        """
+        await self.dom("append_html", sel, value=value, index=index)
+
     async def set_value(self, sel: str, value: str, index: int = 0) -> None:
         await self.dom("set_value", sel, value=value, index=index)
 
@@ -1186,6 +1194,54 @@ class _ChromeNotifications:
         return bool(await _chrome_api("notifications").clear(notification_id))
 
 
+class WasmTrace:
+    """Everything a module did while Python was hosting it.
+
+        with guest.trace() as t:
+            guest.add(2, 3)
+            guest.run()
+        t.report()      # per-export calls and timings, plus host-import calls
+    """
+
+    def __init__(self, instance: "WasmInstance") -> None:
+        self._instance = instance
+        self.records: list[tuple[str, tuple, Any, float]] = []
+        self.host_calls: list[tuple[str, tuple, float]] = []
+
+    def summary(self) -> dict:
+        by_name: dict[str, dict] = {}
+        for name, _args, _result, us in self.records:
+            row = by_name.setdefault(name, {"calls": 0, "us": 0.0})
+            row["calls"] += 1
+            row["us"] = round(row["us"] + us, 1)
+        return {
+            "exports": by_name,
+            "export_calls": len(self.records),
+            "host_calls": len(self.host_calls),
+            "host_names": sorted({name for name, _a, _us in self.host_calls}),
+            "total_us": round(sum(r[3] for r in self.records) + sum(h[2] for h in self.host_calls), 1),
+        }
+
+    def report(self) -> str:
+        s = self.summary()
+        lines = [f"exports={s['export_calls']} host={s['host_calls']} total={s['total_us']}us"]
+        for name, row in sorted(s["exports"].items(), key=lambda kv: -kv[1]["us"]):
+            lines.append(f"  {name:14} {row['calls']:5}x {row['us']:9.1f}us")
+        if s["host_names"]:
+            lines.append("  host imports: " + ", ".join(s["host_names"]))
+        return "\n".join(lines)
+
+    def __enter__(self) -> "WasmTrace":
+        self._instance._recorder = self
+        _ACTIVE_RECORDER[0] = self
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        self._instance._recorder = None
+        _ACTIVE_RECORDER[0] = None
+        return False
+
+
 class WasmMemory:
     """A wasm linear memory addressed the way Python addresses bytes."""
 
@@ -1214,8 +1270,15 @@ class WasmFunction:
         self._fn, self.name, self._owner = fn, name, owner
 
     def __call__(self, *args: Any) -> Any:
-        result = self._fn(*[int(a) if isinstance(a, bool) is False and isinstance(a, int) else a for a in args])
-        for hook in list(self._owner._hooks):
+        import time as _time
+
+        started = _time.perf_counter()
+        result = self._fn(*args)
+        elapsed = (_time.perf_counter() - started) * 1e6
+        owner = self._owner
+        if owner._recorder is not None:
+            owner._recorder.records.append((self.name, args, result, elapsed))
+        for hook in list(owner._hooks):
             hook(self.name, args, result)
         return result
 
@@ -1236,6 +1299,7 @@ class WasmInstance:
         object.__setattr__(self, "_instance", instance)
         object.__setattr__(self, "_hooks", [])
         object.__setattr__(self, "_cache", {})
+        object.__setattr__(self, "_recorder", None)
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -1261,6 +1325,10 @@ class WasmInstance:
     def exports(self) -> list[str]:
         keys = js.Object.keys(self._instance.exports)
         return sorted(str(k) for k in keys)
+
+    def trace(self) -> "WasmTrace":
+        """Record every export call (with timing) and every host-import call."""
+        return WasmTrace(self)
 
     def instrument(self, hook: Callable[[str, tuple, Any], None]) -> Callable[[str, tuple, Any], None]:
         """Call `hook(name, args, result)` after every export call. Returns the hook."""
@@ -1320,6 +1388,7 @@ class Wasm:
 
 
 _WASM_PROXIES: list[Any] = []
+_ACTIVE_RECORDER: list[Any] = [None]  # set by WasmTrace so imports can record too
 
 
 def _wasm_bytes(data: bytes) -> Any:
@@ -1330,7 +1399,13 @@ def _wasm_bytes(data: bytes) -> Any:
 
 def _host_function(fn: Callable, name: str) -> Callable:
     def call(*args: Any) -> Any:
+        import time as _time
+
+        started = _time.perf_counter()
         result = fn(*args)
+        recorder = _ACTIVE_RECORDER[0]
+        if recorder is not None:
+            recorder.host_calls.append((name, args, (_time.perf_counter() - started) * 1e6))
         return int(result) if isinstance(result, bool) is False and isinstance(result, int) else result
 
     call.__name__ = f"host_{name}"

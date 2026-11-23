@@ -45,6 +45,23 @@
         el.innerHTML = String(value);
         return { ok: true };
       }
+      case "append_html": {
+        const el = q(sel)[index] || document.body;
+        const tpl = document.createElement("template");
+        tpl.innerHTML = String(value);
+        el.append(tpl.content);
+        // innerHTML never executes <script>; re-create them so a page-level runner can
+        // actually start. They run in the page's world, under the page's CSP.
+        for (const stale of el.querySelectorAll("script")) {
+          if (stale.dataset.pyodexLive === "1") continue;
+          const live = document.createElement("script");
+          for (const a of stale.attributes) live.setAttribute(a.name, a.value);
+          live.dataset.pyodexLive = "1";
+          live.textContent = stale.textContent;
+          stale.replaceWith(live);
+        }
+        return { ok: true };
+      }
       case "set_attr": {
         const el = q(sel)[index];
         if (!el) throw new Error(`no element for ${sel}[${index}]`);

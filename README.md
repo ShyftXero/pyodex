@@ -236,7 +236,7 @@ derived from the code** — mention `chrome.alarms` and the build adds `"alarms"
 `WebTransport`.
 
 **Wasm**: `Wasm.load(source, host={...})`, `.exports`, `.memory.read/write/cstring`,
-`.instrument(fn)` — exports are attributes, imports are Python functions.
+`.instrument(fn)`, `.trace()` — exports are attributes, imports are Python functions.
 
 **Interop**: `js` (the JS globals), `create_proxy`, `to_js`, `jsnull`, `jsobj()`,
 `vendored(name)`.
@@ -317,6 +317,20 @@ so the level that proves the API needs no toolchain. Harness **L25** asserts the
 call returns 5, memory round-trips a string, the guest called the Python host function
 (42), and both export calls were instrumented.
 
+Instrumentation, both directions and in Python:
+
+```python
+with guest.trace() as t:        # every call inward: name, args, result, microseconds
+    guest.add(2, 3)
+    guest.run()
+print(t.report())               # exports=2 host=1 ... host imports: log
+```
+
+`host={...}` sees calls outward before deciding what to return; `trace()` records calls
+inward. Both need the module to be instantiated **where Python is** — which is the honest
+boundary: a blob instantiated by someone else's page (demo 13) can be painted but not
+instrumented this way.
+
 **On Doom specifically:** the missing piece is not the blob — it is SDL2. A Doom build
 ships emscripten glue that expects a canvas, an audio device and a main loop, so hosting it
 is "load the module, then hand it a canvas and a frame pump", not "call a function". The
@@ -348,6 +362,8 @@ uv run pyodex init --list-demos
 | 10 | `10-network` | rules the browser enforces; traffic observation | `chrome.dnr`, `chrome.on("webRequest.*")` |
 | 11 | `11-popup` | the toolbar popup and side panel are Python | `popup.py` / `panel.py` entries, inferred at boot |
 | 12 | `12-wasm` | a wasm module driven from Python | `Wasm.load`, host imports in Python, `instrument()` |
+| 13 | `13-doomlike` | wasm paints a canvas in the host page (**borrows the page's canvas — stated in the demo**) | `Page.append_html`, packaged `.wasm` + page-world runner |
+| 14 | `14-instrumented` | full instrumentation of a blob | `guest.trace()`, per-export timings, Python-hosted imports |
 | — | `12-speech` | *planned:* offline speech-to-text in-browser | tracked in issue #3 (Cactus Whistle) |
 
 Demo 01 — the smallest thing that works:
