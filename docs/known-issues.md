@@ -50,3 +50,20 @@ then confirms.
 
 `link_cow` prefers reflink, then hardlink, then copy. Building into `/tmp` while
 the store lives in `~/.cache` crosses filesystems, so builds there report `copy`.
+
+## Gate flake (29/30 → 30/30 wobble) — not reproduced 2026-11-23 (T2)
+
+**History.** Earlier sessions saw the gate drop one level on consecutive runs under
+`--jobs 10` (suspect L23 dNR live-fetch or L29 computed-style read).
+
+**T2 sweep.** 4 full runs: 3× `--jobs 10` + 1× `--jobs 1`. All **30/30**. Flake did not
+reproduce.
+
+**Why likely gone.** L23 already retries the blocked fetch 20× with `cache: 'no-store'`
+(rule application lags the `updateDynamicRules` promise under parallel load). That guard
+is in place and held across all 4 runs.
+
+**Status.** Not reproduced, so not newly fixed — a timing flake that doesn't fire isn't
+proof it's dead. If it returns, bisect L23 vs L29 by running each solo 10× at `--jobs 10`
+and watching for the one assertion that occasionally reads stale state. Logs from this
+sweep: `/tmp/t2/run{1..4}.log` (ephemeral).
