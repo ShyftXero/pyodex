@@ -247,6 +247,41 @@ ui, page = Overlay(), Page()
 ui.card("Hi").body.innerText = await page.text("h1")
 ```
 
+## Manifest permissions come from your code
+
+You never edit `manifest.json`. The build reads what the app actually mentions and adds
+the permission it needs:
+
+```python
+from pyodex_runtime import chrome      # nothing else to declare
+
+await chrome.alarms.create("tick", 1)  # build adds "alarms"
+```
+
+| Code mentions | Manifest gets |
+|---|---|
+| `chrome.alarms` | `alarms` |
+| `chrome.contextMenus` | `contextMenus` |
+| `chrome.notifications` | `notifications` |
+| `chrome.cookies` | `cookies` |
+| `chrome.downloads` | `downloads` |
+| `chrome.bookmarks` | `bookmarks` |
+| `chrome.history` | `history` |
+| `chrome.identity` | `identity` |
+| `chrome.dnr` | `declarativeNetRequest` |
+| `chrome.dnr.test` | `declarativeNetRequestFeedback` as well |
+| `chrome.on("webRequest.…")` | `webRequest` |
+| `chrome.tabs.capture_visible_tab` | `activeTab` |
+
+Every row is verified by `tests/test_permissions.py` (so the table cannot rot) and the
+wrapped APIs are exercised end to end by harness levels L21–L24. `popup.py` and
+`panel.py` do the same trick for UI: presence of the file emits `popup.html` /
+`sidepanel.html` plus the `sidePanel` permission and the `side_panel` entry.
+
+Why this matters: a missing permission is the classic silent failure in extension work —
+the API exists, the call returns, nothing happens. Deriving it from code removes the one
+manifest edit that Python cannot check for you.
+
 ## Demos
 
 Five extensions, all pure Python, escalating from "does the loop work" to the

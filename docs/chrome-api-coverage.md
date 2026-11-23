@@ -76,6 +76,8 @@ blocked or excluded for a stated reason rather than being unfinished.
 
 **Manifest permissions are derived from the code.** Mention `chrome.alarms` and the build
 adds `"alarms"`; mention `chrome.dnr.test` and it adds `declarativeNetRequestFeedback` too.
+`tests/test_permissions.py` pins every row of the README table, so documentation and
+behaviour cannot drift apart.
 Four separate permission facts had to be learned the hard way and are now encoded:
 
 - `contextMenus.create` is callback-style and returns its id synchronously, so awaiting it
