@@ -48,7 +48,7 @@ semantics worth their own test before we claim it.
 
 ## Not wrapped — the real gaps
 
-Everything that used to be here has been closed except four rows, and each of those is
+Everything that used to be here is closed except **three** rows, and each of those is
 blocked or excluded for a stated reason rather than being unfinished.
 
 | Capability | Status | Reason |
@@ -56,8 +56,7 @@ blocked or excluded for a stated reason rather than being unfinished.
 | **Background work without a tab** | **blocked by the platform** | Pyodide cannot run in an MV3 service worker, and offscreen documents do not execute in our test Chromium. The shared engine needs at least one live tab. Work with zero tabs open is not possible today — and it is not something a wrapper can fix |
 | **Inject script into pages** | **deliberate exclusion** | `scripting.executeScript` would let a Python string become JavaScript in another origin: the remote-code boundary this framework exists to keep closed. DOM ops go through the typed content-script bridge instead |
 | **Debugger attach** | **deliberate exclusion** | CDP from an extension shows a permanent infobar and hands full page control to the extension. Too much risk for a framework default |
-| **Side panel in Python** | **open** | same shape as the popup (demo 11) and next on the list: `sidePanel.setPanelBehavior` + a page that boots `panel.py` |
-| `identity` / OAuth | **wrapped, not exercised** | `chrome.identity.get_auth_token()` exists and raises a real message when `[oauth2]` is not configured. No level, because a headless harness cannot complete a consent flow — so it is not claimed |
+| `identity` / OAuth | **wrapped; failure path exercised (L22)** | `get_auth_token()` raises an actionable message naming `[oauth2] client_id` when unconfigured, and L22 asserts that wording. The *success* path is untested: a headless harness cannot finish a consent flow, so it is not claimed |
 
 ### Closed in this pass
 
@@ -73,6 +72,7 @@ blocked or excluded for a stated reason rather than being unfinished.
 | Network rules | `chrome.dnr.add_rule / add_redirect_rule / rules / clear / test` | L23 |
 | Request observation | `chrome.on("webRequest.*")` | L23 |
 | Popup in Python | `popup.py` as an entry, inferred at boot | L24 |
+| Side panel in Python | `panel.py` as an entry; `side_panel` + `sidePanel` permission emitted by the build | L24 |
 
 **Manifest permissions are derived from the code.** Mention `chrome.alarms` and the build
 adds `"alarms"`; mention `chrome.dnr.test` and it adds `declarativeNetRequestFeedback` too.

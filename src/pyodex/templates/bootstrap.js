@@ -176,8 +176,9 @@ async function boot() {
 
   // Inferred rather than injected: MV3's CSP forbids inline <script>, so the popup
   // page cannot set a flag that way.
-  const entry = window.__PYODEX_ENTRY__ ||
-    (location.pathname.endsWith("/popup.html") ? "popup.py" : "main.py");
+  const entry = window.__PYODEX_ENTRY__ || (
+    location.pathname.endsWith("/popup.html") ? "popup.py" :
+    location.pathname.endsWith("/sidepanel.html") ? "panel.py" : "main.py");
   setStatus(`Running ${entry}…`);
   await pyodide.runPythonAsync(await fetchText("app/" + entry));
 

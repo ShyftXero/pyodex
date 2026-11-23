@@ -1,7 +1,7 @@
 [extension]
 name = "Demo 11 Popup"
 version = ""
-description = "The toolbar popup is Python too: popup.py runs in the same interpreter."
+description = "The toolbar popup and side panel are Python too: popup.py / panel.py run in the same interpreter."
 matches = ["<all_urls>"]
 boot = "user"
 http = false

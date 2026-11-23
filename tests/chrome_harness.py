@@ -1057,8 +1057,9 @@ def check_l21(level, ctx, env, c: Checks) -> None:
     c.expect("alarm registered", "demo08-tick" in (text or ""), f"text={(text or '')[:200]!r}")
     c.expect("context menu round-trip", "contextMenus: added + removed" in (text or ""),
              f"text={(text or '')[:200]!r}")
-    c.expect("notification attempted honestly",
-             "notifications: created" in (text or "") or "notifications: " in (text or ""),
+    # It does work here, so require it: an "attempted something" assertion would pass
+    # even with the API removed, which is the definition of a lying gate.
+    c.expect("notification created", "notifications: created" in (text or ""),
              f"text={(text or '')[:200]!r}")
     # alarms have a 30s floor; give it room, then require the event to arrive
     fired = wait_for(lambda: "alarm fired" in frame_text(frame) and frame_text(frame), 90)
@@ -1083,6 +1084,12 @@ def check_l22(level, ctx, env, c: Checks) -> None:
              f"text={(text or '')[:200]!r}")
     c.expect("bookmarks and history readable",
              "bookmarks:" in (text or "") and "history:" in (text or ""), f"text={(text or '')[:200]!r}")
+    # identity is wrapped but unexercised as a flow; what IS testable is that the
+    # failure is actionable rather than an opaque Chrome error.
+    ident = wait_for(lambda: "identity:" in frame_text(frame) and frame_text(frame), 45)
+    c.expect("identity failure is actionable",
+             "oauth2" in (ident or "").lower() or "client_id" in (ident or "").lower(),
+             f"text={(ident or '')[-200:]!r}")
 
 
 def check_l23(level, ctx, env, c: Checks) -> None:
@@ -1099,16 +1106,22 @@ def check_l23(level, ctx, env, c: Checks) -> None:
         return
     print(f"    network -> {text!r}")
     c.expect("dynamic rule installed", "rules: [1]" in (text or ""), f"text={(text or '')[:200]!r}")
-    # The rule has to actually block a live request, not merely exist.
-    blocked = page.evaluate("""async () => {
-        try { await fetch('/blocked.js'); return 'allowed'; }
-        catch (e) { return 'blocked'; }
-    }""")
+    # The rule has to actually block a live request, not merely exist. Retried, because
+    # rule application can lag the updateDynamicRules promise under parallel load.
+    def fetch_outcome(url: str) -> str:
+        return page.evaluate("""async (u) => {
+            try { const r = await fetch(u, {cache: 'no-store'}); return r.ok ? 'ok' : 'not-ok'; }
+            catch (e) { return 'blocked'; }
+        }""", url)
+
+    blocked = "allowed"
+    for attempt in range(20):
+        blocked = fetch_outcome("/blocked.js?v=%d" % attempt)
+        if blocked == "blocked":
+            break
+        time.sleep(0.5)
     c.expect("rule blocks a real request", blocked == "blocked", f"page fetch -> {blocked!r}")
-    allowed = page.evaluate("""async () => {
-        try { const r = await fetch('/plain.html'); return r.ok ? 'ok' : 'not-ok'; }
-        catch (e) { return 'blocked'; }
-    }""")
+    allowed = fetch_outcome("/plain.html")
     c.expect("other requests still work", allowed != "blocked", f"page fetch -> {allowed!r}")
     c.expect("webRequest observed a request",
              bool(wait_for(lambda: "webRequest: " in frame_text(frame)
@@ -1140,6 +1153,19 @@ def check_l24(level, ctx, env, c: Checks) -> None:
     c.expect("popup shows live data from chrome.tabs", "Tabs" in body and "Python" in body,
              f"app={body[:120]!r}")
     pop.close()
+
+    # Same machinery, second surface: panel.py renders the side panel.
+    panel = ctx.new_page()
+    panel.goto(origin + "/sidepanel.html")
+    panel_status = wait_for(
+        lambda: "side panel rendered by Python" in
+        (panel.evaluate("() => document.getElementById('status')?.textContent || ''") or "")
+        and panel.evaluate("() => document.getElementById('status')?.textContent || ''"),
+        90)
+    c.expect("side panel rendered by Python", bool(panel_status), f"status={panel_status!r}")
+    panel_app = panel.evaluate("() => document.getElementById('app')?.textContent || ''")
+    c.expect("side panel shows the current tab", "Side panel" in panel_app, f"app={panel_app[:120]!r}")
+    panel.close()
 
 
 CHECKS = {

@@ -337,7 +337,7 @@ def _copy(src: Path, dst: Path) -> None:
 
 
 def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | None = None,
-              python_popup: bool = False) -> dict:
+              python_popup: bool = False, python_panel: bool = False) -> dict:
     m = {
         "manifest_version": 3,
         "name": cfg.name,
@@ -365,6 +365,10 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
         perms.append("storage")  # chrome.storage holds the cache opt-out list
     if cfg.engine == "shared" or cfg.ui == "engine":
         perms.append("offscreen")  # hosts the single shared interpreter
+    if python_panel:
+        # side_panel needs its permission before the permissions list is written.
+        m["side_panel"] = {"default_path": "sidepanel.html"}
+        perms.append("sidePanel")
     for perm in extra_perms or []:
         if perm not in perms:
             perms.append(perm)
@@ -553,7 +557,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
                                                      {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
             resources += ["pagebridge.js", "pagemain.js"]
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file()), indent=2) + "\n")
+                                 (project / "popup.py").is_file(),
+                                 (project / "panel.py").is_file()), indent=2) + "\n")
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
@@ -604,7 +609,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
                 (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
             resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file()), indent=2) + "\n")
+                                 (project / "popup.py").is_file(),
+                                 (project / "panel.py").is_file()), indent=2) + "\n")
         print(f"built {runtime} tier ({cfg.slug})")
 
     if cfg.runtime == "rustpython":
@@ -705,6 +711,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     python_popup = (project / "popup.py").is_file()
     if python_popup:
         _copy(project / "popup.py", app / "popup.py")
+    python_panel = (project / "panel.py").is_file()
+    if python_panel:
+        _copy(project / "panel.py", app / "panel.py")
     for rel in cfg.python_files:
         _copy(project / rel, app / Path(rel).name)
     py_manifest = sorted(str(p.relative_to(app)) for p in app.rglob("*") if p.is_file())
@@ -729,6 +738,10 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
         if "popup.html" not in resources:
             resources.append("popup.html")
+    if python_panel:
+        (out / "sidepanel.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
+        if "sidepanel.html" not in resources:
+            resources.append("sidepanel.html")
     if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
             or cfg.engine == "shared" or cfg.ui == "engine"):
         # Rendered, not copied: the worker carries the runtime blob patterns and
@@ -800,7 +813,8 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
 
     (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file()), indent=2) + "\n")
+                                 (project / "popup.py").is_file(),
+                                 (project / "panel.py").is_file()), indent=2) + "\n")
     return out
 
 
