@@ -114,3 +114,39 @@ runtime_base = "bundled"
         icon = manifest.get("icons", {}).get("128")
         assert icon, f"{name}: manifest declares no icon"
         assert (out / icon).is_file(), f"{name}: manifest names {icon} but the build did not emit it"
+
+
+def test_finish_refuses_a_manifest_that_names_a_file_it_did_not_emit(tmp_path: Path):
+    """The single exit verifies; that is what makes 'every path emits the icon' true.
+
+    Rather than trusting four build paths to remember, _finish checks the manifest against
+    the directory and fails loudly — Chrome's own failure mode here is silence.
+    """
+    import pytest
+
+    from pyodex.builder import ExtConfig, _finish
+
+    out = tmp_path / "dist"
+    out.mkdir()
+    (out / "manifest.json").unlink(missing_ok=True)
+    cfg = ExtConfig(name="T", version="1", description="d", entry="main.py", cache=False)
+
+    # injector.js is named by every manifest's content_scripts and was not emitted here
+    with pytest.raises(RuntimeError, match="did not emit"):
+        _finish(out, tmp_path, cfg, ["overlay.html"])
+
+
+def test_finish_emits_the_icon_whatever_the_call_site(tmp_path: Path):
+    from pyodex.builder import ExtConfig, _finish
+
+    for name, icon in (("default", ""), ("declared", "my.png")):
+        out = tmp_path / name
+        out.mkdir()
+        (out / "overlay.html").write_text("x")
+        (out / "injector.js").write_text("x")
+        (out / "bg.js").write_text("x")  # named by the manifest when the runtime is remote
+        if icon:
+            (tmp_path / icon).write_bytes(b"png")
+        cfg = ExtConfig(name="T", version="1", description="d", entry="main.py", icon=icon, cache=False)
+        _finish(out, tmp_path, cfg, ["overlay.html", "injector.js"])
+        assert (out / (icon or "icon-128.png")).is_file()

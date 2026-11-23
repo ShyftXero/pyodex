@@ -48,22 +48,70 @@ PERMISSION_HINTS = {
 }
 
 
-def _emit_icon(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
-    """Copy the icon the manifest will name. Every tier path must call this.
+_GLOB_CHARS = set("*[]")
 
-    The manifest always declares an icon (128px is required for a store listing), so a
-    tier that skips the file makes Chrome reject the entire extension — silently, with no
-    content script and therefore no overlay.
+
+def _finish(out: Path, project: Path, cfg: ExtConfig, resources: list[str]) -> None:
+    """The single exit every build path passes through.
+
+    Everything universal happens here exactly once: the store-required icon, the manifest,
+    and a check that every file the manifest names was actually emitted.
+
+    Four build paths used to each write their own manifest, and one of them shipped a
+    manifest naming an icon it never wrote. Chrome rejects that silently — no content
+    script, no overlay, no error — so the fix is not "add the icon in the fourth place",
+    it is "have one place, and make it verify".
     """
+    # 1. the icon the manifest will name (128px is required for a store listing)
     if cfg.icon:
-        if (out.parent / cfg.icon).exists() is False and (cfg.icon not in resources):
-            pass
-        return
-    default_icon = Path(__file__).parent / "assets" / "icon-128.png"
-    if default_icon.is_file():
-        shutil.copy2(default_icon, out / "icon-128.png")
+        source = project / cfg.icon
+        if not source.is_file():
+            raise FileNotFoundError(f"icon = {cfg.icon!r} is declared but missing from {project}")
+        shutil.copy2(source, out / cfg.icon)
+        if cfg.icon not in resources:
+            resources.append(cfg.icon)
+    elif (Path(__file__).parent / "assets" / "icon-128.png").is_file():
+        shutil.copy2(Path(__file__).parent / "assets" / "icon-128.png", out / "icon-128.png")
         if "icon-128.png" not in resources:
             resources.append("icon-128.png")
+
+    # 2. the manifest
+    manifest = _manifest(cfg, resources, _derived_permissions(project, cfg),
+                         (project / "popup.py").is_file(), (project / "panel.py").is_file())
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    # 3. prove the manifest is not lying
+    missing = sorted(n for n in _referenced_files(manifest) if not (out / n).exists())
+    if missing:
+        raise RuntimeError(
+            f"manifest names {len(missing)} file(s) this build did not emit: {missing} — "
+            "Chrome rejects the whole extension when that happens, so it fails here instead"
+        )
+
+
+def _referenced_files(manifest: dict) -> set[str]:
+    """Every concrete file path the manifest points at (globs and URLs excluded)."""
+    refs: set[str] = set()
+
+    def add(value: object) -> None:
+        if isinstance(value, str) and value and value.endswith((".js", ".css", ".html", ".png",
+                                                               ".svg", ".wasm", ".json")):
+            refs.add(value)
+
+    for cs in manifest.get("content_scripts", []):
+        for key in ("js", "css"):
+            for item in cs.get(key, []) or []:
+                add(item)
+    background = manifest.get("background") or {}
+    for item in background.get("scripts", []) or []:
+        add(item)
+    add(background.get("service_worker"))
+    add(manifest.get("action", {}).get("default_popup"))
+    add((manifest.get("options_ui") or {}).get("page"))
+    add((manifest.get("side_panel") or {}).get("default_path"))
+    for icon in (manifest.get("icons") or {}).values():
+        add(icon)
+    return refs
 
 
 def _derived_permissions(project: Path, cfg: ExtConfig) -> list[str]:
@@ -402,10 +450,16 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
         m["background"] = {"service_worker": "bg.js", "type": "module"}
     if perms:
         m["permissions"] = perms
-        # The shim needs the page's own fetch, so it runs in the MAIN world; the
-        # relay stays isolated because MAIN-world code cannot use chrome.* APIs.
+    # Declare content scripts from what was actually emitted, not from a condition that
+    # resembles the build's. These used to be added whenever `perms` was non-empty, so
+    # `page_cache = false` shipped a manifest naming two files it never wrote — Chrome
+    # rejects the whole extension silently in that case.
+    if "pagebridge.js" in resources:
+        # The shim needs the page's own fetch, so it runs in the MAIN world; the relay
+        # stays isolated because MAIN-world code cannot use chrome.* APIs.
         m["content_scripts"].append(
             {"matches": cfg.matches, "js": ["pagebridge.js"], "run_at": "document_start"})
+    if "pagemain.js" in resources:
         m["content_scripts"].append(
             {"matches": cfg.matches, "js": ["pagemain.js"], "run_at": "document_start", "world": "MAIN"})
     return m
@@ -583,10 +637,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
                                                      {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
             resources += ["pagebridge.js", "pagemain.js"]
-        _emit_icon(out, cfg, resources)
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file(),
-                                 (project / "panel.py").is_file()), indent=2) + "\n")
+        _finish(out, project, cfg, resources)
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
@@ -638,10 +689,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
                 (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
             resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
-        _emit_icon(out, cfg, resources)
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file(),
-                                 (project / "panel.py").is_file()), indent=2) + "\n")
+        _finish(out, project, cfg, resources)
         print(f"built {runtime} tier ({cfg.slug})")
 
     if cfg.runtime == "rustpython":
@@ -754,9 +802,6 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     for rel in cfg.assets:
         _copy(project / rel, out / rel)
         resources.append(rel)
-    if cfg.icon:
-        resources.append(cfg.icon)
-    _emit_icon(out, cfg, resources)
 
     # 5. Runtime helper (python)
     shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
@@ -796,6 +841,10 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "pagemain.js").write_text(
             _render((TEMPLATES / "pagemain.js").read_text(),
                     {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
+        # Declared from `resources`, so writing the files and naming them cannot drift
+        # apart — they did: this path wrote both and registered neither, which is why the
+        # manifest used to add them under an unrelated condition.
+        resources += ["pagebridge.js", "pagemain.js"]
 
     # 6. Templates
     body = cfg.overlay_body or ((project / "overlay.body.html").read_text() if (project / "overlay.body.html").exists() else "")
@@ -846,10 +895,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append("runtime.json")
         print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
 
-    _emit_icon(out, cfg, resources)
-    (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
-                                 (project / "popup.py").is_file(),
-                                 (project / "panel.py").is_file()), indent=2) + "\n")
+    _finish(out, project, cfg, resources)
     return out
 
 
