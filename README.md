@@ -21,14 +21,16 @@
 
 ```python
 # main.py — the whole extension
-from pyodex_runtime import Overlay, chrome, on
+from pyodex_runtime import Overlay, chrome
 
 ui = Overlay()
 ui.card("Hello").body.innerText = "from Python"
 
-@chrome.on("storage.onChanged")
+@chrome.on("storage.onChanged")     # browser event -> Python function
 def changed(args):
     ui.badge("storage moved")
+
+# `on(widget, "click")` is the other one: DOM events on your own UI.
 ```
 
 ```bash
@@ -39,6 +41,133 @@ uv add pyodex && uv run pyodex init my-ext && cd my-ext && uv run pyodex build .
 Write a Chrome (Manifest V3) extension in Python. `pyodex` scaffolds the project,
 bundles a local Pyodide runtime, resolves your Python dependencies for the
 wasm32 target, and emits a loadable unpacked extension.
+
+## Four steps, one column of code
+
+The whole loop, with what you actually get beside each step. Nothing here uses a
+component library, a bundler config, or a second language.
+
+<table>
+<tr><th align="left" width="52%">Code / commands</th><th align="left">What you get</th></tr>
+
+<tr><td>
+
+**1. Have the idea** — declare the extension, nothing else
+
+```toml
+[extension]
+name = "Demo 16 Ui Tour"
+matches = ["<all_urls>"]
+boot = "user"          # a launcher; "auto"/"trigger" boot by themselves
+```
+
+</td><td>
+
+```
+UI tour popup
+├─ header      title · state pill
+├─ menu        4 rows with shortcuts, one active
+├─ body        filter input + primary/secondary buttons
+└─ footer      live counters
+```
+
+</td></tr>
+
+<tr><td>
+
+**2. Write the UI** — layout in Python, states in CSS
+
+```python
+ui = Overlay()
+shell = ui.panel(cls="px-shell", position="fixed",
+                  top="16px", left="16px")
+
+head = el("div", cls="px-head")
+head.appendChild(el("span", cls="px-dot"))
+head.appendChild(el("span", cls="px-title", text="pyodex"))
+shell.appendChild(head)
+
+for label, key in MENU:                     # the menu
+    row = el("div", cls="px-item", tabindex="0")
+    row.appendChild(el("span", text=label))
+    row.appendChild(el("span", cls="px-k", text=key))
+    shell.appendChild(row)
+
+on(search, "input")(typed)                  # and it reacts
+```
+
+```css
+/* overlay.css — hover/focus need a stylesheet, not inline styles */
+.px-item:hover, .px-item:focus-visible { background: #16161a; }
+.px-item[data-active="1"] { box-shadow: inset 2px 0 0 #f43f5e; }
+.px-btn--primary:hover { background: #fb7185; }
+```
+
+</td><td>
+
+<img src="assets/ui-panel.png" alt="The UI tour panel rendered by Python" width="360">
+
+<sub>Real screenshot, rendered by `main.py` in an overlay iframe.</sub>
+
+</td></tr>
+
+<tr><td>
+
+**3. Build and install** — two commands
+
+```bash
+uv run pyodex build . --out dist     # emits a loadable extension
+uv run pyodex zip . --out ext.zip    # same thing, packaged for the store
+```
+
+```
+runtime: runtime=pyodide (55 MB, needs ['dom'])
+built /…/dist
+zipped /…/ext.zip          # 6.3 MB
+```
+
+Then `chrome://extensions` → *Developer mode* → **Load unpacked** → `dist`.
+
+</td><td>
+
+<img src="assets/ui-extensions.png" alt="The extension loaded in chrome://extensions" width="420">
+
+<sub>Real screenshot of `chrome://extensions` after loading `dist`.</sub>
+
+</td></tr>
+
+<tr><td>
+
+**4. Use it** — the UI rides along on the page it was built for
+
+```python
+@on(search, "input")
+def _typed(event):
+    left.innerText = f"{len(str(search.value))} chars"
+
+@chrome.on("storage.onChanged")
+def changed(args):
+    ui.badge("storage moved")
+
+# permissions are derived from this file:
+# chrome.alarms -> "alarms", chrome.dnr -> "declarativeNetRequest"
+```
+
+</td><td>
+
+<img src="assets/ui-full.png" alt="The panel over an unrelated page" width="420">
+
+<sub>Same panel, over an unrelated page: the overlay is opaque, the page is untouched.</sub>
+
+</td></tr>
+</table>
+
+Step 2 is the one worth noting: **layout is Python, states are CSS**. Inline styles cannot
+express `:hover` or `:focus-visible`, so passing `cls="…"` to `ui.panel()` drops the visual
+defaults and lets the stylesheet own the look — an inline background silently beating a
+class is exactly the sort of thing that makes a framework's own styling unpredictable, and
+it did beat it here until [L29](tests/chrome_harness.py) started asserting the computed
+background.
 
 ## See it
 
@@ -176,6 +305,33 @@ def login_form_seen(): ...
 `@watch_for` implies `boot = "trigger"`, `@on_load` implies `visible`, nothing
 declared means `user` (click to run). Explicit config still wins. Declarations
 that cannot be resolved statically are printed as warnings rather than skipped.
+
+### When a trigger declares no match
+
+An app that says "I belong on `/article/*`" will still be loaded on other pages (Chrome
+runs the content script everywhere the manifest says), so something has to decide what
+happens there. Three controls, because a silent nothing and a normal-looking launcher are
+both wrong answers:
+
+| Knob | Default | What it does |
+|---|---|---|
+| the label | `· no match` | you can tell at a glance this is not the normal affordance |
+| the tooltip | names the declared patterns | "Declared for `^.*://.*/article/.*$`. This page does not match — click to run anyway." |
+| `escape_hatch = false` | `true` | remove it entirely: an app that means "nowhere else" gets nothing elsewhere |
+
+The hatch is also rendered muted and dashed, so it never reads as "this extension runs
+everywhere". [L28](tests/chrome_harness.py) asserts all of it — label, pattern in the
+tooltip, dashed/muted styling, the `data-pyodex-escape-hatch` marker, and that no
+interpreter boots on the unmatched page.
+
+And when the config contradicts the declarations, the build says so instead of quietly
+honouring the stricter one:
+
+```
+declarations: 1 watch_for, 1 urlmatch (regex) -> boot = 'user', 1 trigger(s)
+note: 1 trigger(s) declared but boot = 'user' — the app waits for a click on every page;
+      "trigger" boots only where a declaration matches
+```
 
 ## Boot policy
 
@@ -436,6 +592,8 @@ uv run pyodex init --list-demos
 | 12 | `12-wasm` | a wasm module driven from Python | `Wasm.load`, host imports in Python, `instrument()` |
 | 13 | `13-doomlike` | wasm paints a canvas in the host page (**borrows the page's canvas — stated in the demo**) | `Page.append_html`, packaged `.wasm` + page-world runner |
 | 14 | `14-instrumented` | full instrumentation of a blob | `guest.trace()`, per-export timings, Python-hosted imports |
+| 15 | `15-reading-mode` | Python that only exists where the URL says | `@urlmatch` + `@watch_for`, page rewrite |
+| 16 | `16-ui-tour` | the UI vocabulary, and what CSS owns | `el()`, `panel(cls=…)`, `overlay.css` |
 | — | `12-speech` | *planned:* offline speech-to-text in-browser | tracked in issue #3 (Cactus Whistle) |
 
 Demo 01 — the smallest thing that works:

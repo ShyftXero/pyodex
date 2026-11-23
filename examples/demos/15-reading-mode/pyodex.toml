@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 15 Reading Mode"
+version = ""
+description = "Python that exists only where the URL says it should: rewrite an article into a clean reading view."
+matches = ["<all_urls>"]
+boot = "trigger"
+http = false

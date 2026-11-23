@@ -197,6 +197,7 @@ class ExtConfig:
     # Declarative triggers: boot when the page matches, without user interaction.
     # Each entry: {"url"?: glob, "selector"?: css}. Both present -> both must match.
     triggers: list[dict] = field(default_factory=list)
+    escape_hatch: bool = True  # show a launcher when a trigger declares no match
     declarations: dict = field(default_factory=dict)  # extracted @on_load/@watch_for/@on_event
 
     @property
@@ -263,6 +264,7 @@ def _config_from_data(data: dict, *, default_name: str, default_entry: str) -> E
         reap_hidden_after=ext.get("reap_hidden_after", 300),
         max_live=ext.get("max_live", 0),
         triggers=ext.get("triggers", []),
+        escape_hatch=bool(ext.get("escape_hatch", True)),
     )
 
 
@@ -290,6 +292,12 @@ def _apply_declarations(project: Path, cfg: ExtConfig, ext: dict) -> ExtConfig:
             cfg.boot = "visible"
     print(f"declarations: {summarise(decls)} -> boot = {cfg.boot!r}"
           + (f", {len(cfg.triggers)} trigger(s)" if cfg.triggers else ""))
+    if cfg.triggers and cfg.boot in ("user", "visible"):
+        # Respect the ceiling, but say what it costs: the app declared where it belongs
+        # and will still sit behind a click everywhere.
+        print(f"note: {len(cfg.triggers)} trigger(s) declared but boot = {cfg.boot!r} — "
+              'the app waits for a click on every page; "trigger" boots only where a '
+              "declaration matches")
     return cfg
 
 
@@ -536,7 +544,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
-            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
+            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
             "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html", "DEV": "true",
         }))
         resources = ["overlay.html", "bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
@@ -589,7 +599,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
             "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
             "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
-            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
+            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
             "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": page,
         }))
         resources = [page, "bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
@@ -785,7 +797,9 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
         "OVERLAY_PAGE": "overlay.html",
         "DEV": "true" if cfg.dev else "false",
-        "TRIGGERS": json.dumps(cfg.triggers),
+        "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
         "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
         "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
     }

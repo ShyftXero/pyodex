@@ -104,6 +104,8 @@
   const REAP_HIDDEN_MS = {{REAP_HIDDEN_MS}};
   const MAX_LIVE = {{MAX_LIVE}};
   const TRIGGERS = {{TRIGGERS}};   // declarative boot conditions: [{url?, selector?}]
+  const ESCAPE_HATCH = {{ESCAPE_HATCH}};  // launcher when a trigger declared no match here
+  const URL_RULES = {{URL_RULES}};        // the declared patterns, for the tooltip
   const LABEL = {{LABEL}};
   const RANK = { user: 0, visible: 1, auto: 2 };
 
@@ -188,11 +190,33 @@
     document.documentElement.appendChild(host);
   }
 
-  function showLauncher() {
+  function showLauncher(text) {
     if (!host) makeLauncher();
     host.style.display = "";
     btn.disabled = false;
-    btn.textContent = LABEL;
+    btn.textContent = text || LABEL;
+  }
+
+  // A trigger-based app that landed on a page its declarations exclude. Two things can go
+  // wrong here: showing nothing (no way to run it anyway) and showing a launcher that looks
+  // exactly like a normal one (reads as "runs everywhere"). This is neither: off by config,
+  // visibly muted, and it names the patterns that would have matched.
+  function showEscapeHatch() {
+    if (!ESCAPE_HATCH) return;
+    showLauncher(`${LABEL} · no match`);
+    if (!btn) return;
+    const patterns = URL_RULES.map((r) => r.pattern).filter(Boolean).join(", ");
+    const why = patterns
+      ? `Declared for ${patterns}. This page does not match — click to run anyway.`
+      : "This page did not match the declared triggers — click to run anyway.";
+    btn.title = why;
+    btn.setAttribute("aria-label", why);
+    if (host) host.dataset.pyodexEscapeHatch = "1";
+    // Visibly not the normal affordance: dashed, muted, smaller.
+    btn.style.opacity = "0.72";
+    btn.style.borderStyle = "dashed";
+    btn.style.fontSize = "12px";
+    btn.style.padding = "8px 12px";
   }
 
   function hideLauncher() {
@@ -393,7 +417,7 @@
       setTimeout(check, 250); // coalesce DOM churn
     });
     triggerObserver.observe(document.documentElement, { childList: true, subtree: true });
-    showLauncher(); // manual escape hatch while nothing matches
+    showEscapeHatch();
   }
 
   // ---- start ------------------------------------------------------------ //

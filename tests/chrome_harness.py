@@ -81,6 +81,21 @@ PAGE_CACHE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pyo
 </script>
 </body></html>"""
 
+ARTICLE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>The Long Read: A Field Guide to Browsers</title></head><body>
+<nav><a href="/">home</a> · <a href="/archive">archive</a> · <a href="/about">about</a></nav>
+<main>
+  <article>
+    <h1>A Field Guide to Browsers</h1>
+    <p class="lead">Every extension is a negotiation with the page it lands on, and most of that negotiation is invisible until it fails.</p>
+    <p>Content scripts run in an isolated world; the page keeps its own globe, its own prototypes, its own idea of what <code>Array.isArray</code> means.</p>
+    <p>That isolation is the point, but it is also why a helper written for one realm so often silently does nothing in the other.</p>
+    <p>The practical consequence is that an extension which respects the boundary must send messages, not share memory, and must expect nothing to be synchronous.</p>
+  </article>
+  <aside id="ad-slot">SPONSORED · Buy something you do not need</aside>
+  <footer>© field guide</footer>
+</main></body></html>"""
+
 SHOP_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Shop</title></head>
 <body><h1 id="item" data-item="Wireless mouse">Wireless mouse</h1>
 <p>Price: <span id="p" data-price="PRICE">PRICE</span></p></body></html>"""
@@ -135,6 +150,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path.startswith("/phish"):
             body = PHISH_PAGE.encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/article/"):
+            body = ARTICLE_PAGE.encode()
             self.send_response(200)
             self.send_header("content-type", "text/html; charset=utf-8")
             self.send_header("content-length", str(len(body)))
@@ -337,6 +360,10 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L29", "demo-16-ui-tour", "", "demo 16: UI vocabulary, layout in Python, states in CSS", 29, ("primary",),
+          demo="16-ui-tour"),
+    Level("L28", "demo-15-reading-mode", "", "demo 15: URL-gated Python rewrites an article", 28, ("primary",),
+          demo="15-reading-mode"),
     Level("L27", "demo-14-instrumented", "", "demo 14: full wasm instrumentation from Python", 27, ("primary",),
           demo="14-instrumented"),
     Level("L26", "demo-13-doomlike", "", "demo 13: wasm paints a canvas in the host page", 26, ("primary",),
@@ -1250,6 +1277,97 @@ def check_l27(level, ctx, env, c: Checks) -> None:
              f"text={(text or '')[-300:]!r}")
 
 
+def check_l28(level, ctx, env, c: Checks) -> None:
+    """Demo 15: the interpreter boots only on a matching URL, and reacts to it."""
+    # 1. A non-matching page must never boot Python — that is the whole claim.
+    quiet = ctx.new_page()
+    quiet.goto(f"{env['base']}/plain.html")
+    quiet.wait_for_timeout(6000)
+    frames = [f for f in quiet.frames if "overlay.html" in (f.url or "")]
+    c.expect("no interpreter on an unmatched URL", not frames, f"frames={len(frames)}")
+    # The launcher stays as a manual escape hatch, but it must admit there was no match —
+    # otherwise it looks like the extension runs everywhere, which is the opposite claim.
+    hatch = quiet.evaluate("""() => {
+        const host = document.getElementById('pyodex-demo-15-reading-mode-launcher');
+        const btn = host && host.shadowRoot && host.shadowRoot.querySelector('button');
+        if (!btn) return null;
+        const cs = getComputedStyle(btn);
+        return { label: btn.textContent, title: btn.title, aria: btn.getAttribute('aria-label'),
+                 dashed: cs.borderStyle, opacity: cs.opacity, marked: host.dataset.pyodexEscapeHatch };
+    }""")
+    c.expect("escape hatch says why it is there", bool(hatch) and "no match" in hatch["label"],
+             f"hatch={hatch}")
+    c.expect("escape hatch names the declared patterns",
+             bool(hatch) and "/article/" in hatch["title"], f"title={(hatch or {}).get('title')!r}")
+    c.expect("escape hatch is not the normal affordance",
+             bool(hatch) and hatch["dashed"] == "dashed" and float(hatch["opacity"]) < 0.9,
+             f"style={(hatch or {}).get('dashed')}/{(hatch or {}).get('opacity')}")
+    c.expect("escape hatch is marked for tooling", bool(hatch) and hatch["marked"] == "1",
+             f"marked={(hatch or {}).get('marked')!r}")
+    quiet.close()
+
+    # 2. A matching URL boots, computes, and changes the page.
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/article/1")
+    frame = wait_for(lambda: overlay_frame(page), 90)
+    if not c.expect("booted on the matched URL", frame is not None, "no overlay frame"):
+        return
+    text = wait_for(lambda: "words" in frame_text(frame) and frame_text(frame), 90)
+    if not c.expect("stats computed", bool(text), f"text={frame_text(frame)[:200]!r}"):
+        return
+    print(f"    reading -> {text!r}")
+
+    header = page.evaluate("() => document.querySelector('#pyodex-reading')?.textContent || ''")
+    c.expect("page rewritten with Python's numbers", "min read" in header and "words" in header,
+             f"header={header[:120]!r}")
+    marker = page.evaluate("() => document.querySelector('#pyodex-reading')?.dataset.pyodexReading")
+    c.expect("header is ours, not the page's", marker == "1", f"marker={marker!r}")
+    hidden = page.evaluate("() => document.getElementById('ad-slot')?.hasAttribute('hidden')")
+    c.expect("sponsored block removed", hidden is True, f"hidden={hidden!r}")
+
+    # 3. The arithmetic has to agree with the page, not just look plausible.
+    words_on_page = page.evaluate("""() => [...document.querySelectorAll('article p')]
+        .filter(p => !p.closest('#pyodex-reading'))
+        .map(p => p.textContent.trim())
+        .filter(Boolean)
+        .reduce((n, t) => n + t.split(/\s+/).length, 0)""")
+    claimed = int((header.split("words")[0].strip().split()[-1]) or 0)
+    c.expect("word count matches the page", claimed == words_on_page,
+             f"claimed={claimed} actual={words_on_page}")
+
+
+def check_l29(level, ctx, env, c: Checks) -> None:
+    """Demo 16: the UI builds, is styled by CSS (not clobbered by inline defaults), and reacts."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    c.expect("panel rendered", bool(wait_for(lambda: frame.query_selector(".px-shell"), 60)), "no .px-shell")
+    c.expect("menu has four items", len(frame.query_selector_all(".px-item")) == 4,
+             f"items={len(frame.query_selector_all('.px-item'))}")
+
+    # The CSS class must win over inline defaults, or the panel is translucent and its
+    # own styling silently does nothing. This bit us: ui.panel() injected a background.
+    bg = frame.evaluate("() => getComputedStyle(document.querySelector('.px-shell')).backgroundColor")
+    c.expect("class-based styling wins", bg == "rgb(11, 11, 13)", f"background={bg!r}")
+    radius = frame.evaluate("() => getComputedStyle(document.querySelector('.px-shell')).borderRadius")
+    c.expect("stylesheet radius applied", radius.startswith("14px"), f"radius={radius!r}")
+
+    # Interaction: clicking a menu row changes selection; typing updates the footer.
+    frame.evaluate("""() => document.querySelectorAll('.px-item')[3]
+        .dispatchEvent(new MouseEvent('click', {bubbles: true}))""")
+    active = wait_for(lambda: frame.evaluate(
+        "() => document.querySelector('.px-item[data-active=\"1\"]')?.textContent || ''"), 20)
+    c.expect("click selects a different row", "Settings" in (active or ""), f"active={active!r}")
+
+    frame.evaluate("""() => { const i = document.querySelector('.px-input');
+        i.value = 'capture'; i.dispatchEvent(new Event('input', {bubbles: true})); }""")
+    footer = wait_for(lambda: frame.evaluate("() => document.querySelector('.px-foot')?.textContent || ''"), 20)
+    c.expect("typing updates live state", "7 chars" in (footer or ""), f"footer={footer!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1280,6 +1398,8 @@ CHECKS = {
     "L25": check_l25,
     "L26": check_l26,
     "L27": check_l27,
+    "L28": check_l28,
+    "L29": check_l29,
 }
 
 

@@ -1,0 +1,50 @@
+/* States live here; layout lives in Python. Inline styles cannot express :hover. */
+.px-shell {
+  font: 13px/1.5 system-ui, -apple-system, sans-serif;
+  color: #f4f4f5;
+  background: #0b0b0d;
+  border: 1px solid #27272a;
+  border-radius: 14px;
+  padding: 0;
+  width: 340px;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+.px-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px; }
+.px-dot { width: 8px; height: 8px; border-radius: 50%; background: #f43f5e; }
+.px-title { font-weight: 650; letter-spacing: -0.01em; }
+.px-pill {
+  margin-left: auto; font: 600 10px/1 ui-monospace, monospace; letter-spacing: .12em;
+  text-transform: uppercase; color: #fca5a5; background: rgba(244, 63, 94, .12);
+  border: 1px solid rgba(244, 63, 94, .35); border-radius: 999px; padding: 5px 8px;
+}
+.px-menu { border-top: 1px solid #27272a; }
+.px-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  cursor: pointer; border-bottom: 1px solid #1c1c20; transition: background .12s ease;
+}
+.px-item:hover, .px-item:focus-visible { background: #16161a; outline: none; }
+.px-item[data-active="1"] { background: rgba(244, 63, 94, .1); box-shadow: inset 2px 0 0 #f43f5e; }
+.px-item .px-k {
+  margin-left: auto; font: 600 10px/1 ui-monospace, monospace; color: #71717a;
+  border: 1px solid #2f2f35; border-radius: 5px; padding: 3px 5px;
+}
+.px-body { padding: 14px 16px; display: grid; gap: 10px; }
+.px-input {
+  width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid #2f2f35;
+  background: #131316; color: inherit; font: inherit;
+}
+.px-input::placeholder { color: #71717a; }
+.px-input:focus { outline: none; border-color: #f43f5e; box-shadow: 0 0 0 3px rgba(244, 63, 94, .15); }
+.px-row { display: flex; gap: 8px; }
+.px-btn {
+  flex: 1; padding: 9px 12px; border-radius: 8px; border: 1px solid #2f2f35;
+  background: #18181b; color: inherit; font: inherit; font-weight: 600; cursor: pointer;
+}
+.px-btn:hover { border-color: #52525b; }
+.px-btn--primary { background: #f43f5e; border-color: #f43f5e; color: #17060a; }
+.px-btn--primary:hover { background: #fb7185; border-color: #fb7185; }
+.px-foot {
+  padding: 10px 16px; border-top: 1px solid #27272a; color: #71717a;
+  font: 11px/1.4 ui-monospace, monospace; display: flex; justify-content: space-between;
+}

@@ -42,3 +42,44 @@ def test_unmentioned_permissions_are_not_added(tmp_path: Path):
     (tmp_path / "main.py").write_text("print('no chrome here')")
     cfg = _config_from_data({}, default_name="t", default_entry="main.py")
     assert _derived_permissions(tmp_path, cfg) == []
+
+
+def test_escape_hatch_can_be_disabled(tmp_path: Path):
+    """A trigger-only app can refuse to offer a launcher anywhere else.
+
+    The default keeps a way to run the app anyway; `escape_hatch = false` is for apps
+    that mean it ("never on other pages"), and the rendered flag must follow the config.
+    """
+    from pyodex.builder import build_extension
+
+    (tmp_path / "pyodex.toml").write_text("""[extension]
+name = "Hatch Off"
+matches = ["<all_urls>"]
+boot = "trigger"
+escape_hatch = false
+http = false
+""")
+    (tmp_path / "main.py").write_text(
+        "from pyodex_runtime import urlmatch, watch_for\n\n"
+        '@urlmatch(["*://*/article/*"])\n@watch_for("article")\ndef go():\n    pass\n'
+    )
+    out = build_extension(tmp_path)
+    injector = (out / "injector.js").read_text()
+    assert "ESCAPE_HATCH = false" in injector
+
+
+def test_escape_hatch_defaults_on(tmp_path: Path):
+    from pyodex.builder import build_extension
+
+    (tmp_path / "pyodex.toml").write_text("""[extension]
+name = "Hatch On"
+matches = ["<all_urls>"]
+boot = "trigger"
+http = false
+""")
+    (tmp_path / "main.py").write_text(
+        "from pyodex_runtime import urlmatch, watch_for\n\n"
+        '@urlmatch(["*://*/article/*"])\n@watch_for("article")\ndef go():\n    pass\n'
+    )
+    out = build_extension(tmp_path)
+    assert "ESCAPE_HATCH = true" in (out / "injector.js").read_text()

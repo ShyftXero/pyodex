@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 16 Ui Tour"
+version = ""
+description = "The whole UI vocabulary in one screen: panel, menu, badge, input, buttons, and CSS for states."
+matches = ["<all_urls>"]
+boot = "user"
+http = false

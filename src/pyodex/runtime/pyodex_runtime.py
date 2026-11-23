@@ -485,11 +485,25 @@ class Overlay:
                 setattr(b.style, k, f"{v}px")
         return self.mount(b)
 
-    def panel(self, *, id: str | None = None, **style: str) -> Any:
-        base = dict(position="fixed", pointer_events="auto", background="rgba(24,24,27,.95)",
-                    color="#fff", padding="12px", border_radius="8px", font="14px system-ui, sans-serif")
+    _PANEL_DEFAULTS = dict(position="fixed", pointer_events="auto",
+                           background="rgba(24,24,27,.95)", color="#fff", padding="12px",
+                           border_radius="8px", font="14px system-ui, sans-serif")
+    _POSITION_ONLY = ("position", "pointer_events", "top", "left", "right", "bottom", "width",
+                      "height", "z_index", "inset", "display", "margin")
+
+    def panel(self, *, id: str | None = None, cls: str | None = None, **style: str) -> Any:
+        """A container.
+
+        Passing `cls` means "style this from CSS", so the visual defaults are dropped —
+        inline styles outrank stylesheet rules, and silently clobbering a class is the
+        kind of thing that makes a framework's own styling feel unpredictable. Only the
+        positioning defaults survive, since a CSS class rarely decides where it sits.
+        """
+        base = dict(self._PANEL_DEFAULTS) if not cls else {
+            k: v for k, v in self._PANEL_DEFAULTS.items() if k in self._POSITION_ONLY
+        }
         base.update(style)
-        return self.mount(el("div", id=id, **base))
+        return self.mount(el("div", id=id, cls=cls, **base))
 
     def card(self, title: str = "", *, id: str | None = None, top: int = 16, left: int = 16,
              width: int = 300, **style: str) -> Any:
