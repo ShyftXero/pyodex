@@ -21,13 +21,28 @@ import tomllib
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import PYODIDE_VERSION
-from .deps import HTTP_SHIM_PACKAGES, PYODIDE_CORE_FILES, ensure_pyodide, ensure_url_asset
-from .packages import (Pin, abi_from_lock, ensure_in_store, link_cow, lock, pyodide_constraints,
-                       record_digests, script_dependencies, uv_platform, verify_against_lock)
+from .deps import (
+    HTTP_SHIM_PACKAGES,
+    PYODIDE_CORE_FILES,
+    ensure_pyodide,
+    ensure_url_asset,
+)
+from .packages import (
+    Pin,
+    abi_from_lock,
+    ensure_in_store,
+    link_cow,
+    lock,
+    pyodide_constraints,
+    record_digests,
+    script_dependencies,
+    uv_platform,
+    verify_against_lock,
+)
 from .runtimes import TierPlan, cache_patterns, choose, requirements_for
-
 
 # Code that needs a manifest permission to work at all.
 PERMISSION_HINTS = {
@@ -46,6 +61,108 @@ PERMISSION_HINTS = {
     "chrome.dnr.test": "declarativeNetRequestFeedback",   # testMatchOutcome lives here
     "webRequest.": "webRequest",
 }
+
+
+
+# ---- shared emitters ------------------------------------------------------ #
+# Each artefact below has exactly one writer. Before this, three build paths rendered the
+# same templates from hand-copied placeholder dicts, and one of them registered neither of
+# the two relay files it wrote. The rule: if you write a file, append it to `resources` in
+# the same function, and let the manifest read `resources` rather than re-deriving.
+
+
+def _needs_bg(cfg: ExtConfig) -> bool:
+    """Is a service worker needed? One predicate, read by the writer and the manifest."""
+    return bool((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
+                or cfg.engine == "shared" or cfg.ui == "engine")
+
+
+def _needs_relay(cfg: ExtConfig) -> bool:
+    """The MAIN-world fetch shim + its isolated relay: only when page caching is on."""
+    return bool(cfg.page_cache and cfg.page_cache_hosts)
+
+
+def _app_ctx(cfg: ExtConfig, *, page: str = "overlay.html", scripts: str = "") -> dict:
+    """Placeholders shared by injector.js, bg.js and the overlay page — one dictionary."""
+    return {
+        "NAME": cfg.name, "SLUG": cfg.slug, "LABEL": json.dumps(cfg.name),
+        "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
+        "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
+        "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
+        "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers),
+        "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
+        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
+        "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
+        "OVERLAY_PAGE": page, "DEV": "true" if cfg.dev else "false", "SCRIPTS": scripts,
+        "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
+        "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
+        "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
+    }
+
+
+def _emit_injector(out: Path, cfg: ExtConfig, resources: list[str], *, page: str = "overlay.html") -> None:
+    (out / "injector.js").write_text(
+        _render((TEMPLATES / "injector.js").read_text(), _app_ctx(cfg, page=page)))
+    resources.append("injector.js")
+
+
+def _emit_overlay_page(out: Path, project: Path, cfg: ExtConfig, resources: list[str],
+                       *, page: str = "overlay.html", scripts: str = "") -> None:
+    body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
+                                if (project / "overlay.body.html").exists() else "")
+    css = cfg.overlay_css or ((project / "overlay.css").read_text()
+                              if (project / "overlay.css").exists() else "")
+    (out / page).write_text(_render((TEMPLATES / "overlay.html").read_text(), {
+        **_app_ctx(cfg, page=page, scripts=scripts), "BODY": body, "CSS": css}))
+    resources.append(page)
+
+
+def _emit_cache_surface(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
+    if not cfg.cache:
+        return
+    for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
+        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+        resources.append(name)
+
+
+def _emit_worker(out: Path, cfg: ExtConfig, project: Path, resources: list[str]) -> None:
+    """bg.js: the event bridge and the runtime-blob cache relay."""
+    if not _needs_bg(cfg):
+        return
+    ctx = {**_app_ctx(cfg), "EVENTS": json.dumps(_declared_events(project, cfg))}
+    (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), ctx))
+    resources.append("bg.js")
+
+
+def _emit_relay(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
+    """The MAIN-world fetch shim and its isolated relay."""
+    if not _needs_relay(cfg):
+        return
+    (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
+    (out / "pagemain.js").write_text(_render(
+        (TEMPLATES / "pagemain.js").read_text(),
+        {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
+    resources += ["pagebridge.js", "pagemain.js"]
+
+
+def _emit_engine_host(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
+    """The SharedWorker host and its per-tab agent, or the shared-engine document."""
+    names: tuple[str, ...] = ()
+    if cfg.ui == "engine":
+        names += ("engine_worker.js", "agent.html", "agent.js")
+    if cfg.engine == "shared":
+        names += ("engine.html", "engine.js")
+    for name in names:
+        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+        resources.append(name)
+
+
+def _patch_manifest(out: Path, **updates: Any) -> None:
+    """The one other sanctioned manifest change — sandbox registration."""
+    path = out / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest.update(updates)
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 _GLOB_CHARS = set("*[]")
@@ -428,9 +545,7 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
     if cfg.host_permissions:
         m["host_permissions"] = cfg.host_permissions
     m["icons"] = {"128": cfg.icon or "icon-128.png"}
-    if python_popup:
-        m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
-    elif cfg.cache and cfg.popup:
+    if python_popup or cfg.cache and cfg.popup:
         m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
     perms: list[str] = []
     if cfg.cache:
@@ -512,7 +627,6 @@ def _plan_runtime(cfg: ExtConfig, requirements: list[str], project: Path) -> Tie
         crypto=_imports_any(project, cfg, ("hashlib", "hmac", "cryptography")),
         full_stdlib=bool(cfg.pyodide_packages),
     )
-    names = [cfg.runtime] if cfg.runtime else cfg.runtimes
     from .runtimes import RUNTIMES
 
     considered = list(cfg.runtimes or ["micropython", "rustpython", "pyodide"])
@@ -559,12 +673,12 @@ def _imports_any(project: Path, cfg: ExtConfig, modules: tuple[str, ...]) -> boo
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                if any(a.name.split(".")[0] in modules for a in node.names):
-                    return True
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                if node.module.split(".")[0] in modules:
-                    return True
+            if isinstance(node, ast.Import) and any(
+                    a.name.split(".")[0] in modules for a in node.names):
+                return True
+            if isinstance(node, ast.ImportFrom) and node.module and (
+                    node.module.split(".")[0] in modules):
+                return True
     return False
 
 
@@ -578,15 +692,17 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     # Stamp the datever before anything can return early: an empty "version" makes
     # the manifest invalid and Chrome refuses to load the extension silently.
     if not cfg.version:
-        from .version import chrome_version, datever as _datever
+        from .version import chrome_version
+        from .version import datever as _datever
 
         cfg.version = chrome_version(_datever())
 
-    resources: list[str] = ["overlay.html", "bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
-                            "pyodide/*", "app/*", "wheels/*", "agent.html", "agent.js",
-                            "engine_worker.js", "engine.html", "engine.js"]
+    # Only what is always emitted. Everything else registers itself in _emit_*(), so a
+    # name here can never point at a file this build skipped — the engine files used to be
+    # listed unconditionally, which lit up the invariant test as "registered but absent".
+    resources: list[str] = ["bootstrap.js", "pyodex_runtime.py", "pyodex_natural.py",
+                            "pyodide/*", "app/*", "wheels/*"]
 
-    plan_mp = None  # set when the micropython tier is chosen
     def _mp_build() -> None:
         """MicroPython tier: vendored wasm, its own bootstrap, tiny shim."""
         from .deps import ensure_micropython
@@ -603,40 +719,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         app.mkdir()
         _copy(project / cfg.entry, app / "main.py")
         (app / "files.json").write_text(json.dumps(["main.py"]))
-        body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
-                                    if (project / "overlay.body.html").exists() else "")
-        css = cfg.overlay_css or ((project / "overlay.css").read_text()
-                                  if (project / "overlay.css").exists() else "")
-        (out / "overlay.html").write_text(_render((TEMPLATES / "overlay.html").read_text(), {
-            "NAME": cfg.name, "BODY": body, "CSS": css, "SCRIPTS": "",
-        }))
-        shutil.copy2(TEMPLATES / "injector.js", out / "injector.js") if False else None
-        (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
-            "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
-            "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
-            "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
-            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": "overlay.html", "DEV": "true",
-        }))
-        resources = ["overlay.html", "bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
-        # The cache surface is runtime-agnostic; the manifest references these, so
-        # a tier that omits them makes Chrome reject the whole extension.
-        if cfg.cache:
-            for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
-                (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-            resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
-        if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
-            (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
-                "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
-                "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
-            }))
-            resources.append("bg.js")
-            (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
-            (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
-                                                     {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
-            resources += ["pagebridge.js", "pagemain.js"]
+        resources = ["bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
+        _emit_overlay_page(out, project, cfg, resources, scripts="")
+        _emit_injector(out, cfg, resources)
+        _emit_cache_surface(out, cfg, resources)
+        _emit_worker(out, cfg, project, resources)
+        _emit_relay(out, cfg, resources)
         _finish(out, project, cfg, resources)
         print(f"built micropython tier ({cfg.slug})")
 
@@ -656,39 +744,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         app.mkdir()
         _copy(project / cfg.entry, app / "main.py")
         (app / "files.json").write_text(json.dumps(["main.py"]))
-        body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
-                                    if (project / "overlay.body.html").exists() else "")
-        css = cfg.overlay_css or ((project / "overlay.css").read_text()
-                                  if (project / "overlay.css").exists() else "")
-        page_html = _render((TEMPLATES / "overlay.html").read_text(), {
-            "NAME": cfg.name, "BODY": body, "CSS": css, "SCRIPTS": "",
-        })
-        (out / page).write_text(page_html)
-        (out / "injector.js").write_text(_render((TEMPLATES / "injector.js").read_text(), {
-            "SLUG": cfg.slug, "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
-            "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
-            "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
-            "MAX_LIVE": str(int(cfg.max_live)), "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
-            "LABEL": json.dumps(cfg.name), "ENGINE_UI": "false", "OVERLAY_PAGE": page,
-        }))
-        resources = [page, "bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
-        # The manifest references these whenever page caching is on; a tier that
-        # omits them makes Chrome reject the whole extension (silently).
-        if (cfg.page_cache and cfg.page_cache_hosts) or cfg.ui == "engine":
-            (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
-                "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
-                "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
-            }))
-            (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
-            (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
-                                                     {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
-            resources += ["bg.js", "pagebridge.js", "pagemain.js"]
-        if cfg.cache:
-            for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
-                (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-            resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+        resources = ["bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
+        _emit_overlay_page(out, project, cfg, resources, page=page, scripts="")
+        _emit_injector(out, cfg, resources, page=page)
+        _emit_cache_surface(out, cfg, resources)
+        _emit_worker(out, cfg, project, resources)
+        _emit_relay(out, cfg, resources)
         _finish(out, project, cfg, resources)
         print(f"built {runtime} tier ({cfg.slug})")
 
@@ -709,9 +770,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             n = stub_new_function(out / "rustpython" / "rustpython_wasm.js")
             print(f"rustpython: new Function stubbed ({n} site) — no sandbox")
         if cfg.sandbox:
-            manifest = json.loads((out / "manifest.json").read_text())
-            manifest["sandbox"] = {"pages": ["sandbox.html"]}
-            (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            _patch_manifest(out, sandbox={"pages": ["sandbox.html"]})
         return out
 
     if cfg.runtime == "micropython":
@@ -806,10 +865,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     # 5. Runtime helper (python)
     shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
     shutil.copy2(RUNTIME / "pyodex_natural.py", out / "pyodex_natural.py")
-    if cfg.cache:
-        for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
-            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-        resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+    _emit_cache_surface(out, cfg, resources)
     if python_popup:
         # popup.py wins over the static cache popup: same interpreter, own page.
         (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
@@ -819,65 +875,20 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "sidepanel.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
         if "sidepanel.html" not in resources:
             resources.append("sidepanel.html")
-    if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
-            or cfg.engine == "shared" or cfg.ui == "engine"):
-        # Rendered, not copied: the worker carries the runtime blob patterns and
-        # any build-pinned digests (so caching covers tiers we do not bundle).
-        (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), {
-            "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
-            "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
-            "EVENTS": json.dumps(_declared_events(project, cfg)),
-        }))
-    if cfg.ui == "engine":
-        # SharedWorker host: one interpreter for the browser, one tiny agent iframe
-        # per tab. No offscreen document (it is not even executed in our harness).
-        for name in ("engine_worker.js", "agent.html", "agent.js"):
-            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-    if cfg.engine == "shared":
-        for name in ("engine.html", "engine.js"):
-            (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
-    if cfg.page_cache and cfg.page_cache_hosts:
-        (out / "pagebridge.js").write_text((TEMPLATES / "pagebridge.js").read_text())
-        (out / "pagemain.js").write_text(
-            _render((TEMPLATES / "pagemain.js").read_text(),
-                    {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
-        # Declared from `resources`, so writing the files and naming them cannot drift
-        # apart — they did: this path wrote both and registered neither, which is why the
-        # manifest used to add them under an unrelated condition.
-        resources += ["pagebridge.js", "pagemain.js"]
+    _emit_worker(out, cfg, project, resources)
+    _emit_engine_host(out, cfg, resources)
+    _emit_relay(out, cfg, resources)
 
-    # 6. Templates
-    body = cfg.overlay_body or ((project / "overlay.body.html").read_text() if (project / "overlay.body.html").exists() else "")
-    css = cfg.overlay_css or ((project / "overlay.css").read_text() if (project / "overlay.css").exists() else "")
-    script_tags = "\n".join(f'  <script src="{s}"></script>' for s in cfg.scripts)
-    ctx = {
-        "NAME": cfg.name,
-        "BODY": body,
-        "CSS": css,
-        "SCRIPTS": script_tags,
-        "URL_FILTER": json.dumps(cfg.url_filter),
-        "SLUG": cfg.slug,
-        "LABEL": json.dumps(cfg.name),
-        "BOOT_MODE": json.dumps(cfg.boot),
-        "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
-        "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
-        "MAX_LIVE": str(int(cfg.max_live)),
-        "REMOTE_RUNTIME": "true" if cfg.runtime_base != "bundled" else "false",
-        "ENGINE_UI": "true" if cfg.ui == "engine" else "false",
-        "OVERLAY_PAGE": "overlay.html",
-        "DEV": "true" if cfg.dev else "false",
-        "TRIGGERS": json.dumps(cfg.triggers), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-        "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]), "ESCAPE_HATCH": "true" if cfg.escape_hatch else "false",
-            "URL_RULES": json.dumps([r for t in cfg.triggers for r in (t.get("url_rules") or [])]),
-        "RUNTIME_PATTERNS": json.dumps(cache_patterns(cfg.runtimes)),
-        "RUNTIME_PINS": json.dumps(cfg.runtime_pins),
-    }
-    for t in ("overlay.html", "bootstrap.js", "injector.js"):
-        (out / t).write_text(_render((TEMPLATES / t).read_text(), ctx))
+    # 6. Templates — one writer per file
+    _emit_overlay_page(out, project, cfg, resources)
+    (out / "bootstrap.js").write_text(
+        _render((TEMPLATES / "bootstrap.js").read_text(), _app_ctx(cfg)))
+    _emit_injector(out, cfg, resources)
 
     if not cfg.version:
         # datever, in the dotted form Chrome accepts (max 4 parts, <= 65535 each)
-        from .version import chrome_version, datever as _datever
+        from .version import chrome_version
+        from .version import datever as _datever
 
         cfg.version = chrome_version(_datever())
     if remote:
