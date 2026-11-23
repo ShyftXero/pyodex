@@ -901,6 +901,13 @@ class _ChromeTabs:
     async def reload(self, tab_id: int) -> None:
         await _chrome_api("tabs").reload(tab_id)
 
+    async def capture_visible_tab(self, *, format: str = "png", quality: int = 90) -> str:
+        """Screenshot the visible area as a data URL. Needs "activeTab" or a host permission."""
+        options = {"format": format}
+        if format == "jpeg":
+            options["quality"] = int(quality)
+        return str(await _chrome_api("tabs").captureVisibleTab(jsobj(options)))
+
     async def create(self, url: str, *, active: bool = True) -> int:
         tab = await _chrome_api("tabs").create(jsobj({"url": url, "active": active}))
         return int(tab.id)
@@ -917,6 +924,7 @@ class _ChromeAction:
 
 _BROWSER_EVENTS: dict[str, list[Callable]] = {}
 _EVENT_BRIDGE_READY = False
+_LOCAL_EVENTS: set[str] = set()
 
 
 def _dispatch_browser_event(payload: Any) -> None:
@@ -926,6 +934,8 @@ def _dispatch_browser_event(payload: Any) -> None:
         args = data.get("payload") or []
     except Exception:  # noqa: BLE001
         return
+    if str(name) in _LOCAL_EVENTS:
+        return  # already delivered by the local listener
     for fn in _BROWSER_EVENTS.get(str(name), []):
         _invoke(fn, args)
 
@@ -951,6 +961,37 @@ def _install_event_bridge() -> None:
     _EVENT_BRIDGE_READY = True
 
 
+def _subscribe_local(event: str) -> bool:
+    """Register the listener in *this* realm rather than the worker.
+
+    webRequest events never wake a sleeping MV3 service worker (documented Chrome
+    behaviour), so the worker-side registration is dead on arrival for them. An
+    extension page that is already running can subscribe directly.
+    """
+    if not event.startswith("webRequest."):
+        return False
+    namespace, _, name = event.partition(".")
+    try:
+        target = getattr(js.chrome.webRequest, event.split(".", 1)[1])
+    except AttributeError:
+        return False
+
+    def on_event(*args) -> None:
+        try:
+            payload = json.loads(js.JSON.stringify(list(args)))
+        except Exception:  # noqa: BLE001
+            payload = []
+        for fn in _BROWSER_EVENTS.get(event, []):
+            _invoke(fn, payload)
+
+    # webRequest wants (callback, filter, extraInfoSpec): calling it with the callback
+    # alone fails in Chrome's bindings as "TypeError: No matching signature".
+    # JSON round-trip: a Python list reaching Chrome's bindings is a PyProxy, not an array.
+    filter_ = js.JSON.parse(json.dumps({"urls": ["<all_urls>"]}))
+    target.addListener(js_callback(on_event), filter_, js.Array.new())
+    return True
+
+
 class _ChromeRuntime:
     def url(self, path: str) -> str:
         return runtime_url(path)
@@ -970,6 +1011,181 @@ class _ChromeWindows:
         return [w.to_py() if hasattr(w, "to_py") else dict(w) for w in wins]
 
 
+class _ChromeDnr:
+    """declarativeNetRequest, as a Python rule builder.
+
+    Rules are plain dicts, so nothing here needs a JS AST: the platform wants JSON and
+    Python produces JSON. `test()` asks the browser what a URL would match, which is
+    the only honest way to check a rule without intercepting live traffic.
+    """
+
+    async def add_rule(self, rule_id: int, pattern: str, action: str = "block",
+                       *, resource_types: list[str] | None = None) -> int:
+        rule = {
+            "id": int(rule_id),
+            "priority": 1,
+            "action": {"type": action},
+            "condition": {"urlFilter": pattern,
+                          "resourceTypes": resource_types or [
+                              "main_frame", "sub_frame", "script", "image",
+                              "xmlhttprequest", "other"]},
+        }
+        if action == "redirect":
+            raise ValueError("use add_redirect_rule() for redirect actions")
+        await _chrome_api("declarativeNetRequest").updateDynamicRules(
+            jsobj({"removeRuleIds": [int(rule_id)], "addRules": [rule]}))
+        return int(rule_id)
+
+    async def add_redirect_rule(self, rule_id: int, pattern: str, to: str) -> int:
+        rule = {
+            "id": int(rule_id),
+            "priority": 1,
+            "action": {"type": "redirect", "redirect": {"url": to}},
+            "condition": {"urlFilter": pattern, "resourceTypes": ["main_frame", "sub_frame"]},
+        }
+        await _chrome_api("declarativeNetRequest").updateDynamicRules(
+            jsobj({"removeRuleIds": [int(rule_id)], "addRules": [rule]}))
+        return int(rule_id)
+
+    async def rules(self) -> list[dict]:
+        found = await _chrome_api("declarativeNetRequest").getDynamicRules()
+        return [r.to_py() if hasattr(r, "to_py") else dict(r) for r in found]
+
+    async def clear(self) -> None:
+        current = await self.rules()
+        ids = [int(r.get("id", 0)) for r in current if r.get("id")]
+        if ids:
+            await _chrome_api("declarativeNetRequest").updateDynamicRules(jsobj({"removeRuleIds": ids}))
+
+    async def test(self, url: str, *, type: str = "main_frame") -> dict:  # noqa: A002
+        # `type` is required by testMatchOutcome; omitting it is a TypeError, not a default.
+        # It can also never settle (seen in Chromium 137 with the feedback permission
+        # granted), so it is bounded rather than awaited forever.
+        outcome = await asyncio.wait_for(
+            _chrome_api("declarativeNetRequest").testMatchOutcome(jsobj({"url": url, "type": type})),
+            timeout=3.0)
+        # the result field is `matchedRules`, and `rules` is silently absent
+        return outcome.to_py() if hasattr(outcome, "to_py") else dict(outcome)
+
+
+class _ChromeCookies:
+    """Cookie access for the sending tab's site. Needs the `cookies` permission."""
+
+    async def get(self, url: str, name: str) -> dict | None:
+        cookie = await _chrome_api("cookies").get(jsobj({"url": url, "name": name}))
+        return None if cookie is None else (cookie.to_py() if hasattr(cookie, "to_py") else dict(cookie))
+
+    async def get_all(self, url: str) -> list[dict]:
+        cookies = await _chrome_api("cookies").getAll(jsobj({"url": url}))
+        return [c.to_py() if hasattr(c, "to_py") else dict(c) for c in cookies]
+
+    async def set(self, url: str, name: str, value: str, *, path: str = "/") -> dict:
+        cookie = await _chrome_api("cookies").set(
+            jsobj({"url": url, "name": name, "value": value, "path": path}))
+        return cookie.to_py() if hasattr(cookie, "to_py") else dict(cookie)
+
+    async def remove(self, url: str, name: str) -> None:
+        await _chrome_api("cookies").remove(jsobj({"url": url, "name": name}))
+
+
+class _ChromeDownloads:
+    async def download(self, url: str, *, filename: str | None = None) -> int:
+        options = {"url": url}
+        if filename:
+            options["filename"] = filename
+        return int(await _chrome_api("downloads").download(jsobj(options)))
+
+    async def search(self, query: dict | None = None) -> list[dict]:
+        items = await _chrome_api("downloads").search(jsobj(query or {}))
+        return [i.to_py() if hasattr(i, "to_py") else dict(i) for i in items]
+
+
+class _ChromeBookmarks:
+    async def search(self, query: str = "") -> list[dict]:
+        items = await _chrome_api("bookmarks").search(query)
+        return [i.to_py() if hasattr(i, "to_py") else dict(i) for i in items]
+
+    async def tree(self) -> list[dict]:
+        items = await _chrome_api("bookmarks").getTree()
+        return [i.to_py() if hasattr(i, "to_py") else dict(i) for i in items]
+
+
+class _ChromeHistory:
+    async def search(self, text: str = "", *, limit: int = 20) -> list[dict]:
+        items = await _chrome_api("history").search(jsobj({"text": text, "maxResults": limit}))
+        return [i.to_py() if hasattr(i, "to_py") else dict(i) for i in items]
+
+
+class _ChromeIdentity:
+    async def get_auth_token(self, *, interactive: bool = False) -> str:
+        """Needs `oauth2.client_id` + `scopes` in pyodex.toml; raises a real message if not."""
+        try:
+            return str(await _chrome_api("identity").getAuthToken(jsobj({"interactive": bool(interactive)})))
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                "identity.get_auth_token needs OAuth configured: add [oauth2] client_id and "
+                f"scopes in pyodex.toml (browser said: {e})") from e
+
+
+class _ChromeAlarms:
+    """Periodic work. The callback runs through the event bridge (`onAlarm`)."""
+
+    async def create(self, name: str, period_minutes: float, *, delay_minutes: float | None = None) -> None:
+        spec = {"periodInMinutes": float(period_minutes)}
+        if delay_minutes is not None:
+            spec["delayInMinutes"] = float(delay_minutes)
+        await _chrome_api("alarms").create(name, jsobj(spec))
+
+    async def get_all(self) -> list[dict]:
+        alarms = await _chrome_api("alarms").getAll()
+        return [a.to_py() if hasattr(a, "to_py") else dict(a) for a in alarms]
+
+    async def clear(self, name: str) -> bool:
+        return bool(await _chrome_api("alarms").clear(name))
+
+    async def clear_all(self) -> bool:
+        return bool(await _chrome_api("alarms").clearAll())
+
+
+async def _call_cb(api: Any, method: str, *args: Any) -> Any:
+    """Call a callback-style chrome API and await it.
+
+    Not every chrome.* method is promise-based: `contextMenus.create` returns the id
+    synchronously and takes a callback, so `await`ing it raises
+    "'str' object can't be used in 'await' expression".
+    """
+    async def run() -> Any:
+        return await js.Promise.new(js_callback(lambda resolve, _reject: getattr(api, method)(*args, resolve)))
+
+    return await run()
+
+
+class _ChromeContextMenus:
+    """Right-click entries. Clicks arrive through `onClicked`."""
+
+    async def add(self, menu_id: str, title: str, *, contexts: list[str] | None = None) -> str:
+        await _call_cb(_chrome_api("contextMenus"), "create",
+                       jsobj({"id": menu_id, "title": title, "contexts": contexts or ["page"]}))
+        return menu_id
+
+    async def remove(self, menu_id: str) -> None:
+        await _call_cb(_chrome_api("contextMenus"), "remove", menu_id)
+
+    async def remove_all(self) -> None:
+        await _call_cb(_chrome_api("contextMenus"), "removeAll")
+
+
+class _ChromeNotifications:
+    async def notify(self, notification_id: str, title: str, message: str, *, icon: str | None = None) -> str:
+        options = {"type": "basic", "title": title, "message": message,
+                   "iconUrl": icon or "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="}
+        await _chrome_api("notifications").create(notification_id, jsobj(options))
+        return notification_id
+
+    async def clear(self, notification_id: str) -> bool:
+        return bool(await _chrome_api("notifications").clear(notification_id))
+
+
 class Chrome:
     """`chrome.*` with Python names: `chrome.storage.local.get("k")`, etc.
 
@@ -984,6 +1200,15 @@ class Chrome:
     action = _ChromeAction()
     runtime = _ChromeRuntime()
     windows = _ChromeWindows()
+    alarms = _ChromeAlarms()
+    contextMenus = _ChromeContextMenus()
+    notifications = _ChromeNotifications()
+    dnr = _ChromeDnr()
+    cookies = _ChromeCookies()
+    downloads = _ChromeDownloads()
+    bookmarks = _ChromeBookmarks()
+    history = _ChromeHistory()
+    identity = _ChromeIdentity()
 
     def on(self, event: str, fn: Callable | None = None) -> Callable:
         """Subscribe to a browser event from Python.
@@ -1002,6 +1227,8 @@ class Chrome:
             return deco
         _install_event_bridge()
         _BROWSER_EVENTS.setdefault(event, []).append(fn)
+        if _subscribe_local(event):
+            _LOCAL_EVENTS.add(event)
         return fn
 
     @property

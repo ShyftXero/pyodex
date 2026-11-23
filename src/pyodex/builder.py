@@ -29,6 +29,46 @@ from .packages import (Pin, abi_from_lock, ensure_in_store, link_cow, lock, pyod
 from .runtimes import TierPlan, cache_patterns, choose, requirements_for
 
 
+# Code that needs a manifest permission to work at all.
+PERMISSION_HINTS = {
+    "chrome.alarms": "alarms",
+    "chrome.contextMenus": "contextMenus",
+    "chrome.notifications": "notifications",
+    "chrome.cookies": "cookies",
+    "chrome.downloads": "downloads",
+    "chrome.bookmarks": "bookmarks",
+    "chrome.history": "history",
+    "chrome.identity": "identity",
+    "chrome.declarativeNetRequest": "declarativeNetRequest",
+    "chrome.scripting": "scripting",
+    "chrome.tabs.capture_visible_tab": "activeTab",
+    "chrome.dnr": "declarativeNetRequest",
+    "chrome.dnr.test": "declarativeNetRequestFeedback",   # testMatchOutcome lives here
+    "webRequest.": "webRequest",
+}
+
+
+def _derived_permissions(project: Path, cfg: ExtConfig) -> list[str]:
+    """Add the manifest permissions the app's code actually needs.
+
+    Hand-editing permissions is exactly the boilerplate this framework exists to
+    remove: if the code says `chrome.alarms`, the manifest needs "alarms".
+    """
+    try:
+        src = "\n".join(
+            (project / f).read_text()
+            for f in [cfg.entry, *cfg.python_files]
+            if (project / f).is_file()
+        )
+    except OSError:
+        return []
+    found = []
+    for needle, perm in PERMISSION_HINTS.items():
+        if needle in src and perm not in found:
+            found.append(perm)
+    return found
+
+
 def _uses_dom(project: Path, cfg: ExtConfig) -> bool:
     """Does the app touch the page or draw UI? Decides whether it needs a page host."""
     import ast
@@ -296,7 +336,7 @@ def _copy(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
+def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | None = None) -> dict:
     m = {
         "manifest_version": 3,
         "name": cfg.name,
@@ -322,6 +362,9 @@ def _manifest(cfg: ExtConfig, resources: list[str]) -> dict:
         perms.append("storage")  # chrome.storage holds the cache opt-out list
     if cfg.engine == "shared" or cfg.ui == "engine":
         perms.append("offscreen")  # hosts the single shared interpreter
+    for perm in extra_perms or []:
+        if perm not in perms:
+            perms.append(perm)
     if ((cfg.page_cache and cfg.page_cache_hosts) or cfg.runtime_base != "bundled"
             or cfg.engine == "shared" or cfg.ui == "engine"):
         m["background"] = {"service_worker": "bg.js", "type": "module"}
@@ -506,7 +549,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
                                                      {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
             resources += ["pagebridge.js", "pagemain.js"]
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
@@ -556,7 +599,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
                 (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
             resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
-        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
+        (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
         print(f"built {runtime} tier ({cfg.slug})")
 
     if cfg.runtime == "rustpython":
@@ -742,7 +785,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append("runtime.json")
         print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
 
-    (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources), indent=2) + "\n")
+    (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg)), indent=2) + "\n")
     return out
 
 

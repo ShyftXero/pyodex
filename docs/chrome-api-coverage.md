@@ -44,8 +44,8 @@ by how often an extension actually needs them.
 | ~~**React to browser events**~~ | `chrome.on("ns.event", fn)` | **closed** — see below |
 | **Background work without a tab** | MV3 service worker | Pyodide cannot run in an MV3 service worker (no DOM / eval restrictions). Our shared engine needs at least one tab open; work that must run with zero tabs is impossible today |
 | **Inject script into pages** | `scripting.executeScript`, `registerContentScripts` | our DOM ops go through the content script; arbitrary JS execution in the page is not offered (deliberately — it is the remote-code boundary) |
-| **Network control** | `declarativeNetRequest` (block, redirect, modify headers) | powerful and very commonly used; unwrapped. Rules are JSON, so this is mostly a Python-to-JSON API |
-| **Observe requests** | `webRequest` (MV3: observe only) | logging what a page loads, for analysis tools |
+| **Network control** | `chrome.dnr.add_rule / add_redirect_rule / clear / test` (L23) (block, redirect, modify headers) | powerful and very commonly used; unwrapped. Rules are JSON, so this is mostly a Python-to-JSON API |
+| **Observe requests** | ``chrome.on("webRequest.*")` (L23)` (MV3: observe only) | logging what a page loads, for analysis tools |
 | **Scheduled work** | `alarms` | a Python function every N minutes; needs the event bridge above |
 | **Context menu items** | `contextMenus` | right-click actions; also needs the event bridge |
 | **Notifications** | `notifications` | user-facing alerts |

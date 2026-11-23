@@ -337,6 +337,12 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L23", "demo-10-network", "", "demo 10: declarativeNetRequest + webRequest", 23, ("primary",),
+          demo="10-network"),
+    Level("L22", "demo-09-toolbox", "", "demo 09: cookies, capture, downloads, bookmarks", 22, ("primary",),
+          demo="09-toolbox"),
+    Level("L21", "demo-08-setters", "", "demo 08: alarms, context menus, notifications", 21, ("primary",),
+          demo="08-setters"),
     Level("L20", "demo-07-event-bridge", "", "demo 07: browser events reach Python", 20, ("primary",),
           demo="07-event-bridge"),
     Level("L19", "demo-06-api-tour", "", "demo 06: chrome.* and DOM breadth", 19, ("primary",),
@@ -1034,6 +1040,80 @@ def check_l20(level, ctx, env, c: Checks) -> None:
              f"text={frame_text(frame)[:200]!r}")
 
 
+def check_l21(level, ctx, env, c: Checks) -> None:
+    """Demo 08: the setters exist and their events come back into Python."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#setup-btn")
+    text = wait_for(lambda: "alarms:" in frame_text(frame) and frame_text(frame), 60)
+    if not c.expect("setters reported", bool(text), f"text={frame_text(frame)[:200]!r}"):
+        return
+    c.expect("alarm registered", "demo08-tick" in (text or ""), f"text={(text or '')[:200]!r}")
+    c.expect("context menu round-trip", "contextMenus: added + removed" in (text or ""),
+             f"text={(text or '')[:200]!r}")
+    c.expect("notification attempted honestly",
+             "notifications: created" in (text or "") or "notifications: " in (text or ""),
+             f"text={(text or '')[:200]!r}")
+    # alarms have a 30s floor; give it room, then require the event to arrive
+    fired = wait_for(lambda: "alarm fired" in frame_text(frame) and frame_text(frame), 90)
+    c.expect("alarms.onAlarm reached Python", bool(fired), f"text={frame_text(frame)[:200]!r}")
+
+
+def check_l22(level, ctx, env, c: Checks) -> None:
+    """Demo 09: the permission-gated tooling APIs answer from Python."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#run-btn")
+    text = wait_for(lambda: "cookies:" in frame_text(frame) and frame_text(frame), 60)
+    if not c.expect("toolbox reported", bool(text), f"text={frame_text(frame)[:200]!r}"):
+        return
+    print(f"    toolbox -> {text!r}")
+    c.expect("cookie round-trip", "cookies: hello" in (text or ""), f"text={(text or '')[:200]!r}")
+    c.expect("download created and searchable", "downloads: id=" in (text or "") and "found=1" in (text or ""),
+             f"text={(text or '')[:200]!r}")
+    c.expect("bookmarks and history readable",
+             "bookmarks:" in (text or "") and "history:" in (text or ""), f"text={(text or '')[:200]!r}")
+
+
+def check_l23(level, ctx, env, c: Checks) -> None:
+    """Demo 10: dNR rules are installable and testable; webRequest events arrive."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#run-btn")
+    text = wait_for(lambda: "webRequest:" in frame_text(frame) and frame_text(frame), 60)
+    if not c.expect("network reported", bool(text), f"text={frame_text(frame)[:200]!r}"):
+        return
+    print(f"    network -> {text!r}")
+    c.expect("dynamic rule installed", "rules: [1]" in (text or ""), f"text={(text or '')[:200]!r}")
+    # The rule has to actually block a live request, not merely exist.
+    blocked = page.evaluate("""async () => {
+        try { await fetch('/blocked.js'); return 'allowed'; }
+        catch (e) { return 'blocked'; }
+    }""")
+    c.expect("rule blocks a real request", blocked == "blocked", f"page fetch -> {blocked!r}")
+    allowed = page.evaluate("""async () => {
+        try { const r = await fetch('/plain.html'); return r.ok ? 'ok' : 'not-ok'; }
+        catch (e) { return 'blocked'; }
+    }""")
+    c.expect("other requests still work", allowed != "blocked", f"page fetch -> {allowed!r}")
+    c.expect("webRequest observed a request",
+             bool(wait_for(lambda: "webRequest: " in frame_text(frame)
+                           and "webRequest: 0 observed" not in frame_text(frame), 30)),
+             f"text={frame_text(frame)[:200]!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1057,6 +1137,9 @@ CHECKS = {
     "L18": check_l18,
     "L19": check_l19,
     "L20": check_l20,
+    "L21": check_l21,
+    "L22": check_l22,
+    "L23": check_l23,
 }
 
 

@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 08 Setters"
+version = ""
+description = "Schedules alarms, adds a context menu and shows a notification — then reacts to them in Python."
+matches = ["<all_urls>"]
+boot = "user"
+http = false

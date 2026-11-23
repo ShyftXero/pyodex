@@ -1,0 +1,7 @@
+[extension]
+name = "Demo 10 Network"
+version = ""
+description = "Block requests with declarativeNetRequest and observe traffic with webRequest."
+matches = ["<all_urls>"]
+boot = "user"
+http = false

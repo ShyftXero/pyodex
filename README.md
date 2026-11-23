@@ -223,8 +223,11 @@ Everything an app needs comes from one module — you never import `pyodide`,
 `@urlmatch([...])`, `@on_attach` (engine mode), `events`.
 
 **Extension APIs**: `chrome.local/sync/session`, `chrome.tabs`, `chrome.windows`,
-`chrome.action`, `chrome.runtime`, `chrome.on(event, fn)` for browser events, and
-`chrome.raw` for anything not wrapped.
+`chrome.action`, `chrome.runtime`, `chrome.on(event, fn)` for browser events,
+`chrome.alarms`, `chrome.contextMenus`, `chrome.notifications`, `chrome.cookies`,
+`chrome.downloads`, `chrome.bookmarks`, `chrome.history`, `chrome.identity`,
+`chrome.dnr`, and `chrome.raw` for anything not wrapped. **Manifest permissions are
+derived from the code** — mention `chrome.alarms` and the build adds `"alarms"`.
 
 **Lifecycle & dev**: `keep_alive()`, `release()`, `want_boot()`, `status()`,
 `save()`, `engine_mode()`, `pip_install()`.
@@ -264,6 +267,9 @@ uv run pyodex init --list-demos
 | 05 | `05-tab-watcher` | always-on, one interpreter for the browser | `engine = "shared"` + `ui = "engine"`, `@on_attach` |
 | 06 | `06-api-tour` | the breadth a real extension has | `chrome.tabs/windows/storage/action/runtime`, element handles |
 | 07 | `07-event-bridge` | Python receiving platform events | `chrome.on("storage.onChanged")` |
+| 08 | `08-setters` | alarms, context menus, notifications | `chrome.alarms`, `chrome.contextMenus`, `chrome.notifications` |
+| 09 | `09-toolbox` | cookies, screenshots, downloads, bookmarks | `chrome.cookies`, `chrome.tabs.capture_visible_tab`, `chrome.downloads` |
+| 10 | `10-network` | rules the browser enforces; traffic observation | `chrome.dnr`, `chrome.on("webRequest.*")` |
 
 Demo 01 — the smallest thing that works:
 
