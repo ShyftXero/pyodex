@@ -337,6 +337,8 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L25", "demo-12-wasm", "", "demo 12: a wasm module driven from Python", 25, ("primary",),
+          demo="12-wasm"),
     Level("L24", "demo-11-popup", "", "demo 11: the toolbar popup runs popup.py", 24, ("primary",),
           demo="11-popup"),
     Level("L23", "demo-10-network", "", "demo 10: declarativeNetRequest + webRequest", 23, ("primary",),
@@ -1168,6 +1170,29 @@ def check_l24(level, ctx, env, c: Checks) -> None:
     panel.close()
 
 
+def check_l25(level, ctx, env, c: Checks) -> None:
+    """Demo 12: wasm exports, memory and Python-implemented imports all work."""
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    frame.click("#run-btn")
+    text = wait_for(lambda: "exports:" in frame_text(frame) and frame_text(frame), 90)
+    if not c.expect("wasm ran", bool(text), f"text={frame_text(frame)[:300]!r}"):
+        return
+    print(f"    wasm -> {text!r}")
+    c.expect("export called like a Python function", "add(2, 3) = 5" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("memory is addressed like bytes", "pyodex wasm" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("module called a Python host function", "[42]" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+    c.expect("every export call was instrumented", "'add'" in (text or "") and "'run'" in (text or ""),
+             f"text={(text or '')[:300]!r}")
+
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1195,6 +1220,7 @@ CHECKS = {
     "L22": check_l22,
     "L23": check_l23,
     "L24": check_l24,
+    "L25": check_l25,
 }
 
 

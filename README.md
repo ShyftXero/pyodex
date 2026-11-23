@@ -235,6 +235,9 @@ derived from the code** — mention `chrome.alarms` and the build adds `"alarms"
 **Networking**: `fetch_json()`, `fetch_text()`, `WebSocketClient`, `TcpSocket`,
 `WebTransport`.
 
+**Wasm**: `Wasm.load(source, host={...})`, `.exports`, `.memory.read/write/cstring`,
+`.instrument(fn)` — exports are attributes, imports are Python functions.
+
 **Interop**: `js` (the JS globals), `create_proxy`, `to_js`, `jsnull`, `jsobj()`,
 `vendored(name)`.
 
@@ -282,6 +285,44 @@ Why this matters: a missing permission is the classic silent failure in extensio
 the API exists, the call returns, nothing happens. Deriving it from code removes the one
 manifest edit that Python cannot check for you.
 
+## WASM: load a blob, instrument it from Python
+
+`Wasm.load()` gives an instantiated module a Python shape: exports are attributes, memory
+is addressed like bytes, and — the part that makes it more than a JS proxy — the module's
+**imports are Python functions you write**.
+
+```python
+from pyodex_runtime import Wasm
+
+def host_log(value):            # this *is* the module's env.log import
+    print("guest logged", value)
+
+guest = await Wasm.load("guest.wasm", host={"env": {"log": host_log}})
+
+guest.add(2, 3)                 # exports are attributes, not strings
+guest.memory.write(0, b"hi")    # memory is bytes
+guest.memory.cstring(0)         # 'hi'
+guest.instrument(lambda name, args, result: print(name, args, result))
+guest.run()                     # calls env.log(42) -> your Python function
+```
+
+Why the host-function direction matters: standing in for a module's imports is how you
+instrument it without touching the blob. You can log every allocation, replace a clock,
+deny a capability, or feed a game's file I/O from Python — the module cannot tell the
+difference. `guest.instrument(fn)` does the same for calls going the other way.
+
+"The same API takes a real blob" is not a slogan: demo 12 loads an **89-byte** module that
+`tools/make_demo_wasm.py` hand-encodes (wasm is a binary format, not a compiler feature),
+so the level that proves the API needs no toolchain. Harness **L25** asserts the export
+call returns 5, memory round-trips a string, the guest called the Python host function
+(42), and both export calls were instrumented.
+
+**On Doom specifically:** the missing piece is not the blob — it is SDL2. A Doom build
+ships emscripten glue that expects a canvas, an audio device and a main loop, so hosting it
+is "load the module, then hand it a canvas and a frame pump", not "call a function". The
+`Wasm` layer is the right primitive for that (`guest.frames(...)`, memory-resident
+framebuffer, imports for time/input), but it is a real piece of work, not a demo tweak.
+
 ## Demos
 
 Five extensions, all pure Python, escalating from "does the loop work" to the
@@ -306,6 +347,7 @@ uv run pyodex init --list-demos
 | 09 | `09-toolbox` | cookies, screenshots, downloads, bookmarks | `chrome.cookies`, `chrome.tabs.capture_visible_tab`, `chrome.downloads` |
 | 10 | `10-network` | rules the browser enforces; traffic observation | `chrome.dnr`, `chrome.on("webRequest.*")` |
 | 11 | `11-popup` | the toolbar popup and side panel are Python | `popup.py` / `panel.py` entries, inferred at boot |
+| 12 | `12-wasm` | a wasm module driven from Python | `Wasm.load`, host imports in Python, `instrument()` |
 | — | `12-speech` | *planned:* offline speech-to-text in-browser | tracked in issue #3 (Cactus Whistle) |
 
 Demo 01 — the smallest thing that works:

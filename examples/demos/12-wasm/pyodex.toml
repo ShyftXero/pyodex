@@ -1,0 +1,8 @@
+[extension]
+name = "Demo 12 Wasm"
+version = ""
+description = "Load a wasm blob and drive it from Python: exports, memory, and Python-implemented imports."
+matches = ["<all_urls>"]
+boot = "user"
+http = false
+assets = ["guest.wasm"]

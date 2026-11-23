@@ -1186,6 +1186,157 @@ class _ChromeNotifications:
         return bool(await _chrome_api("notifications").clear(notification_id))
 
 
+class WasmMemory:
+    """A wasm linear memory addressed the way Python addresses bytes."""
+
+    def __init__(self, exports: Any) -> None:
+        self._exports = exports
+
+    def _u8(self) -> Any:
+        return js.Uint8Array.new(self._exports.memory.buffer)
+
+    def read(self, offset: int, size: int) -> bytes:
+        return bytes(self._u8().slice(int(offset), int(offset) + int(size)).to_py())
+
+    def write(self, offset: int, data: bytes | bytearray) -> int:
+        self._u8().set(to_js(bytearray(data)), int(offset))
+        return len(data)
+
+    def cstring(self, offset: int, limit: int = 4096) -> str:
+        raw = self.read(offset, limit).split(b"\x00", 1)[0]
+        return raw.decode("utf-8", "replace")
+
+
+class WasmFunction:
+    """An exported function you can call, wrap, or watch."""
+
+    def __init__(self, fn: Any, name: str, owner: "WasmInstance") -> None:
+        self._fn, self.name, self._owner = fn, name, owner
+
+    def __call__(self, *args: Any) -> Any:
+        result = self._fn(*[int(a) if isinstance(a, bool) is False and isinstance(a, int) else a for a in args])
+        for hook in list(self._owner._hooks):
+            hook(self.name, args, result)
+        return result
+
+    def __repr__(self) -> str:
+        return f"<wasm export {self.name}>"
+
+
+class WasmInstance:
+    """A live wasm instance with a Python surface.
+
+        guest = await Wasm.load("guest.wasm", host={"env": {"log": print}})
+        guest.add(2, 3)                      # exports are attributes, not strings
+        guest.memory.write(0, b"hi")
+        guest.instrument(lambda name, args, result: ...)   # watch every call
+    """
+
+    def __init__(self, instance: Any) -> None:
+        object.__setattr__(self, "_instance", instance)
+        object.__setattr__(self, "_hooks", [])
+        object.__setattr__(self, "_cache", {})
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        cache = object.__getattribute__(self, "_cache")
+        if name in cache:
+            return cache[name]
+        try:
+            value = getattr(self._instance.exports, name)
+        except AttributeError as exc:
+            known = ", ".join(self.exports) or "(none)"
+            raise AttributeError(f"wasm has no export {name!r}; exports: {known}") from exc
+        if callable(value):
+            value = WasmFunction(value, name, self)
+        cache[name] = value
+        return value
+
+    @property
+    def memory(self) -> WasmMemory:
+        return WasmMemory(self._instance.exports)
+
+    @property
+    def exports(self) -> list[str]:
+        keys = js.Object.keys(self._instance.exports)
+        return sorted(str(k) for k in keys)
+
+    def instrument(self, hook: Callable[[str, tuple, Any], None]) -> Callable[[str, tuple, Any], None]:
+        """Call `hook(name, args, result)` after every export call. Returns the hook."""
+        self._hooks.append(hook)
+        return hook
+
+    def __repr__(self) -> str:
+        return f"<wasm instance exports={self.exports}>"
+
+
+class Wasm:
+    """Load a wasm blob and drive it from Python.
+
+    `host` is Python code the module calls into: {"env": {"log": handler}} becomes the
+    module's imports, so instrumentation is ordinary Python rather than JS glue.
+    """
+
+    @staticmethod
+    async def load(source: str | bytes | bytearray, *, host: dict | None = None,
+                   imports: dict | None = None) -> WasmInstance:
+        data = await Wasm._bytes(source)
+        spec: dict[str, Any] = {}
+        for module_name, functions in (host or {}).items():
+            spec[module_name] = {
+                fn_name: js_callback(_host_function(fn, fn_name))
+                for fn_name, fn in functions.items()
+            }
+        for module_name, functions in (imports or {}).items():
+            spec.setdefault(module_name, {}).update(functions)
+        _WASM_PROXIES.append(spec)  # keep the JS callbacks alive
+
+        import_object = js.Object.new()
+        for module_name, functions in spec.items():
+            ns = js.Object.new()
+            for fn_name, fn in functions.items():
+                setattr(ns, fn_name, fn)
+            setattr(import_object, module_name, ns)
+
+        result = await js.WebAssembly.instantiate(_wasm_bytes(data), import_object)
+        return WasmInstance(result.instance)
+
+    @staticmethod
+    async def _bytes(source: str | bytes | bytearray) -> bytes:
+        if isinstance(source, (bytes, bytearray)):
+            return bytes(source)
+        text = str(source)
+        if text.startswith(("http://", "https://", "chrome-extension://", "/")):
+            response = await js.fetch(text)
+            if not response.ok:
+                raise RuntimeError(f"wasm fetch failed: {text} ({response.status})")
+            return bytes(js.Uint8Array.new(await response.arrayBuffer()).to_py())
+        # packaged file, relative to the extension root
+        response = await js.fetch(runtime_url(text))
+        if not response.ok:
+            raise RuntimeError(f"wasm not found in package: {text} ({response.status})")
+        return bytes(js.Uint8Array.new(await response.arrayBuffer()).to_py())
+
+
+_WASM_PROXIES: list[Any] = []
+
+
+def _wasm_bytes(data: bytes) -> Any:
+    view = js.Uint8Array.new(len(data))
+    view.set(to_js(bytearray(data)))
+    return view
+
+
+def _host_function(fn: Callable, name: str) -> Callable:
+    def call(*args: Any) -> Any:
+        result = fn(*args)
+        return int(result) if isinstance(result, bool) is False and isinstance(result, int) else result
+
+    call.__name__ = f"host_{name}"
+    return call
+
+
 class Chrome:
     """`chrome.*` with Python names: `chrome.storage.local.get("k")`, etc.
 
