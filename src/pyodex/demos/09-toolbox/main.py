@@ -54,6 +54,13 @@ async def run() -> None:
     except Exception as e:  # noqa: BLE001
         lines.append(f"bookmarks/history: {type(e).__name__}: {str(e)[:60]}")
 
+    try:
+        await chrome.identity.get_auth_token()
+        lines.append("identity: token")
+    except Exception as e:  # noqa: BLE001
+        # Unconfigured OAuth must say so in words a developer can act on.
+        lines.append(f"identity: {str(e)[:90]}")
+
     card.body.innerText = "\n".join(lines)
     status(None)
 
