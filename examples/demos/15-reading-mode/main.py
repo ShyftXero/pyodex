@@ -11,14 +11,18 @@ an overlay card so you can check its arithmetic against the page.
 
 import asyncio
 
-from pyodex_runtime import Overlay, Page, chrome, on, status, urlmatch, watch_for
+from pyodex_runtime import (Overlay, Page, chrome, events, fetch_text, on, on_event, status,
+                            urlmatch, watch_for)
 
 page = Page()
-ui = Overlay()
+# Informational overlay: `interactive=False` keeps the iframe click-through, so the page
+# stays usable — which matters here, because the point is clicking a link in the page.
+ui = Overlay(interactive=False)
 card = ui.card("Reading mode", width=340)
 card.body.innerText = "reading…"
 
 WORDS_PER_MINUTE = 220
+state = {"url": ""}
 
 
 @urlmatch(["*://*/article/*"])
@@ -27,15 +31,65 @@ def reading_mode():
     asyncio.ensure_future(build())
 
 
+@on_event(events.CLICK, selector="a[href^='/article/']", prevent_default=True)
+def link_clicked(payload):
+    """Intercept a link: the browser stops, Python decides.
+
+    `prevent_default=True` cancels the navigation *synchronously* in the page, then hands
+    us what it would have gone to. Nothing is left to race.
+    """
+    asyncio.ensure_future(open_next(payload))
+
+
+async def open_next(payload: dict) -> None:
+    href = str(payload.get("href") or "")
+    if not href:
+        return
+    card.head.innerText = "Intercepted — Python took over"
+    card.body.innerText = f"link: {payload.get('text', '')[:60]}\n→ {href}\n\nfetching…"
+
+    try:
+        html = await fetch_text(href)
+    except Exception as e:  # noqa: BLE001
+        card.body.innerText = f"fetch failed: {type(e).__name__}"
+        return
+
+    # Crude extraction on purpose: this demo is about the click, not about parsing.
+    import re as _re
+
+    title = (_re.search(r"<title[^>]*>(.*?)</title>", html, _re.S | _re.I) or [None, "(no title)"])[1]
+    paragraphs = _re.findall(r"<p[^>]*>(.*?)</p>", html, _re.S | _re.I)
+    text = " ".join(_re.sub(r"<[^>]+>", "", p).strip() for p in paragraphs)
+    words = len(text.split())
+
+    card.head.innerText = f"Intercepted — {words} words"
+    card.body.innerText = "\n".join([
+        f"page: {title.strip()[:70]}",
+        f"url stayed: {state['url'][-24:]}",
+        "",
+        text[:180] + "…",
+        "",
+        "No navigation happened: the browser's click was cancelled,",
+        "and Python fetched the target instead.",
+    ])
+    status(None)
+
+
 async def build() -> None:
     info = await page.info()
+    state["url"] = info["url"]
     paragraphs = [p for p in (await page.text("article p")) if p]
     words = sum(len(p.split()) for p in paragraphs)
     minutes = max(1, round(words / WORDS_PER_MINUTE))
     lead = paragraphs[0] if paragraphs else ""
 
-    # The visible change: clutter out, a Python-computed header in.
-    await page.set_attr("#ad-slot", "hidden", "1")
+    # The visible change: clutter out, a Python-computed header in. Optional: a page
+    # without an ad slot is not an error, and a demo that crashes on a variant teaches
+    # the wrong lesson about page-shaped assumptions.
+    try:
+        await page.set_attr("#ad-slot", "hidden", "1")
+    except Exception:  # noqa: BLE001
+        pass
     await page.append_html("article", f"""
       <header id="pyodex-reading" data-pyodex-reading="1"
               style="border-left:3px solid #f43f5e;padding:10px 14px;margin:18px 0;

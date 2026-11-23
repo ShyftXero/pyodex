@@ -48,6 +48,24 @@ PERMISSION_HINTS = {
 }
 
 
+def _emit_icon(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
+    """Copy the icon the manifest will name. Every tier path must call this.
+
+    The manifest always declares an icon (128px is required for a store listing), so a
+    tier that skips the file makes Chrome reject the entire extension — silently, with no
+    content script and therefore no overlay.
+    """
+    if cfg.icon:
+        if (out.parent / cfg.icon).exists() is False and (cfg.icon not in resources):
+            pass
+        return
+    default_icon = Path(__file__).parent / "assets" / "icon-128.png"
+    if default_icon.is_file():
+        shutil.copy2(default_icon, out / "icon-128.png")
+        if "icon-128.png" not in resources:
+            resources.append("icon-128.png")
+
+
 def _derived_permissions(project: Path, cfg: ExtConfig) -> list[str]:
     """Add the manifest permissions the app's code actually needs.
 
@@ -361,8 +379,7 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
     }
     if cfg.host_permissions:
         m["host_permissions"] = cfg.host_permissions
-    if cfg.icon:
-        m["icons"] = {"128": cfg.icon}
+    m["icons"] = {"128": cfg.icon or "icon-128.png"}
     if python_popup:
         m["action"] = {"default_popup": "popup.html", "default_title": cfg.name}
     elif cfg.cache and cfg.popup:
@@ -566,6 +583,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             (out / "pagemain.js").write_text(_render((TEMPLATES / "pagemain.js").read_text(),
                                                      {"PAGE_CACHE_HOSTS": json.dumps(cfg.page_cache_hosts)}))
             resources += ["pagebridge.js", "pagemain.js"]
+        _emit_icon(out, cfg, resources)
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
                                  (project / "popup.py").is_file(),
                                  (project / "panel.py").is_file()), indent=2) + "\n")
@@ -620,6 +638,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
             for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
                 (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
             resources += ["cache.js", "options.html", "options.js", "popup.html", "popup.js"]
+        _emit_icon(out, cfg, resources)
         (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
                                  (project / "popup.py").is_file(),
                                  (project / "panel.py").is_file()), indent=2) + "\n")
@@ -737,6 +756,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append(rel)
     if cfg.icon:
         resources.append(cfg.icon)
+    _emit_icon(out, cfg, resources)
 
     # 5. Runtime helper (python)
     shutil.copy2(RUNTIME / "pyodex_runtime.py", out / "pyodex_runtime.py")
@@ -826,6 +846,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         resources.append("runtime.json")
         print(f"runtime: {len(streamed)} file(s) streamed from {runtime['base']}")
 
+    _emit_icon(out, cfg, resources)
     (out / "manifest.json").write_text(json.dumps(_manifest(cfg, resources, _derived_permissions(project, cfg),
                                  (project / "popup.py").is_file(),
                                  (project / "panel.py").is_file()), indent=2) + "\n")
@@ -840,6 +861,49 @@ def zip_dir(built: Path, out: Path | None = None) -> Path:
             if p.is_file():
                 zf.write(p, p.relative_to(built))
     return out
+
+
+def store_report(built: Path) -> list[tuple[bool, str, str]]:
+    """What a Chrome Web Store reviewer would check, checked here instead.
+
+    Returns (ok, check, detail). "Ready to submit" is a claim, so it gets a test rather
+    than a sentence: the two hard blockers are remote code and a missing icon.
+    """
+    import json
+
+    manifest_path = built / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, ValueError) as e:
+        return [(False, "manifest.json", f"unreadable: {e}")]
+
+    checks: list[tuple[bool, str, str]] = []
+    version = str(manifest.get("version") or "")
+    checks.append((bool(version) and version[0].isdigit(), "version",
+                   version or "missing (the store rejects an empty version)"))
+    checks.append((manifest.get("manifest_version") == 3, "manifest_version",
+                   str(manifest.get("manifest_version"))))
+    checks.append((bool(manifest.get("description")), "description",
+                   (manifest.get("description") or "missing")[:60]))
+
+    # Remote code: Pyodide fetched from a CDN is remote code by the store's definition.
+    bundled = (built / "pyodide" / "pyodide.mjs").exists()
+    checks.append((bundled, "runtime is bundled (no remote code)",
+                   "pyodide/ present" if bundled else
+                   "pyodide/ absent — a CDN runtime is remote code and will be rejected"))
+
+    icon = manifest.get("icons", {}).get("128")
+    checks.append((bool(icon) and (built / icon).exists(), "128x128 icon",
+                   icon or "missing (required for a store listing)"))
+
+    perms = manifest.get("permissions") or []
+    broad = [p for p in perms if p in ("<all_urls>", "tabs", "webRequestBlocking")]
+    checks.append((True, "permissions", ", ".join(perms) or "none"
+                   + (f"  ← justify: {', '.join(broad)}" if broad else "")))
+
+    total = sum(f.stat().st_size for f in built.rglob("*") if f.is_file())
+    checks.append((total < 2 * 1024**3, "size", f"{total / 1024**2:.1f} MB uncompressed"))
+    return checks
 
 
 def zip_extension(target: Path, out: Path | None = None) -> Path:

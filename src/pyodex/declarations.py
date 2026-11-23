@@ -209,6 +209,8 @@ def extract(paths: list[Path]) -> Declarations:
                     entry = {"event": str(event)}
                     if args.get("selector"):
                         entry["selector"] = args["selector"]
+                    if args.get("prevent_default"):
+                        entry["prevent_default"] = True
                     events_here.append(entry)
 
             for rule in url_rules:

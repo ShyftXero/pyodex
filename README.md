@@ -63,13 +63,9 @@ boot = "user"          # a launcher; "auto"/"trigger" boot by themselves
 
 </td><td>
 
-```
-UI tour popup
-├─ header      title · state pill
-├─ menu        4 rows with shortcuts, one active
-├─ body        filter input + primary/secondary buttons
-└─ footer      live counters
-```
+<img src="assets/step-1.gif" alt="Writing pyodex.toml" width="340">
+
+<sub>The idea fits in a config file — and that file is the whole declaration.</sub>
 
 </td></tr>
 
@@ -105,9 +101,9 @@ on(search, "input")(typed)                  # and it reacts
 
 </td><td>
 
-<img src="assets/ui-panel.png" alt="The UI tour panel rendered by Python" width="360">
+<img src="assets/step-2.gif" alt="The panel reacting: menu selection and live input" width="340">
 
-<sub>Real screenshot, rendered by `main.py` in an overlay iframe.</sub>
+<sub>Real capture: `main.py` builds it, `overlay.css` styles it, the menu and input react.</sub>
 
 </td></tr>
 
@@ -130,9 +126,9 @@ Then `chrome://extensions` → *Developer mode* → **Load unpacked** → `dist`
 
 </td><td>
 
-<img src="assets/ui-extensions.png" alt="The extension loaded in chrome://extensions" width="420">
+<img src="assets/step-3.gif" alt="Build and package output" width="380">
 
-<sub>Real screenshot of `chrome://extensions` after loading `dist`.</sub>
+<sub>Real output of these two commands, and the preflight below.</sub>
 
 </td></tr>
 
@@ -155,12 +151,42 @@ def changed(args):
 
 </td><td>
 
-<img src="assets/ui-full.png" alt="The panel over an unrelated page" width="420">
+<img src="assets/step-4.gif" alt="A link click intercepted by Python" width="380">
 
-<sub>Same panel, over an unrelated page: the overlay is opaque, the page is untouched.</sub>
+<sub>A real click on a real link: the navigation is cancelled and Python fetches the target.</sub>
 
 </td></tr>
 </table>
+
+### Is the output actually submittable?
+
+Yes — and it is checked, not asserted. `pyodex zip` runs the same preflight a reviewer
+would, and prints it:
+
+```
+store preflight:
+  ok   version                            2026.11.23.1317
+  ok   manifest_version                   3
+  ok   description                        The whole UI vocabulary in one screen: panel, menu, badge, i
+  ok   runtime is bundled (no remote code) pyodide/ present
+  ok   128x128 icon                       icon-128.png
+  ok   permissions                        storage
+  ok   size                               13.2 MB uncompressed
+
+ready to upload
+```
+
+The two hard blockers are the ones worth knowing about:
+
+* **remote code** — a `runtime_base` that streams Pyodide from a CDN is remote code by the
+  store's definition and gets rejected. Bundled is the default for exactly this reason,
+  and the preflight names the failure if you switch it.
+* **the icon** — a build whose only blocker is a missing 128×128 PNG is a silly way to
+  fail, so the build emits one from the project logo when you do not supply your own.
+
+What the preflight cannot judge is the part a reviewer does: whether the permissions the
+code derived are justified by what the extension does. 13.2 MB uncompressed (6.3 MB zipped)
+is well inside the store's limit.
 
 Step 2 is the one worth noting: **layout is Python, states are CSS**. Inline styles cannot
 express `:hover` or `:focus-visible`, so passing `cls="…"` to `ui.panel()` drops the visual

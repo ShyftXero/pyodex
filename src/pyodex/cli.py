@@ -51,8 +51,23 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
 
 def _cmd_zip(args: argparse.Namespace) -> int:
-    out = zip_extension(Path(args.dir).resolve(), Path(args.out).resolve() if args.out else None)
-    print(f"zipped {out}")
+    from .builder import store_report
+
+    project = Path(args.dir).resolve()
+    out = zip_extension(project, Path(args.out).resolve() if args.out else None)
+    print(f"zipped {out}\n")
+
+    built = next((p for p in (project / "dist").iterdir() if (p / "manifest.json").exists()), None)
+    if built is None:
+        return 0
+    print("store preflight:")
+    blocked = 0
+    for ok, check, detail in store_report(built):
+        print(f"  {'ok  ' if ok else 'FAIL'} {check:<34} {detail}")
+        blocked += 0 if ok else 1
+    print("\nready to upload" if not blocked else
+          f"\nnot ready: {blocked} hard blocker(s) above — a zip of a rejected build is "
+          "still rejected")
     return 0
 
 

@@ -83,3 +83,34 @@ http = false
     )
     out = build_extension(tmp_path)
     assert "ESCAPE_HATCH = true" in (out / "injector.js").read_text()
+
+
+def test_every_built_tier_emits_the_icon_its_manifest_names(tmp_path: Path):
+    """A manifest that names a file the build never wrote is silently fatal.
+
+    Chrome rejects the whole extension, so the symptom is "no content script, no overlay"
+    with no error surface at all. This caught the MicroPython and RustPython tiers
+    declaring icon-128.png while only the Pyodide path emitted it.
+    """
+    import json
+
+    from pyodex.builder import build_extension
+
+    for name, runtimes in (("Pyodide", ""), ("MicroPython", 'runtime = "micropython"')):
+        project = tmp_path / name
+        project.mkdir()
+        (project / "pyodex.toml").write_text(f"""[extension]
+name = "Icon {name}"
+matches = ["<all_urls>"]
+runtime_base = "bundled"
+{chr(10) + runtimes if runtimes else ""}
+""")
+        (project / "main.py").write_text(
+            "from pyodex_runtime import Overlay\n\ndocument.body.appendChild(" 
+            "document.createElement('div')).textContent = 'hi'\n"
+        )
+        out = build_extension(project)
+        manifest = json.loads((out / "manifest.json").read_text())
+        icon = manifest.get("icons", {}).get("128")
+        assert icon, f"{name}: manifest declares no icon"
+        assert (out / icon).is_file(), f"{name}: manifest names {icon} but the build did not emit it"

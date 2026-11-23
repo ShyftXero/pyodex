@@ -273,20 +273,36 @@
 
   // ---- content-script <-> overlay bridge -------------------------------- //
   const subscriptions = new Map();
-  function subscribeEvents({ selector, events = ["click"], throttle_ms = 0 }) {
+  function subscribeEvents({ selector, events = ["click"], throttle_ms = 0, prevent_default = false }) {
     for (const ev of events) {
-      const key = selector + "|" + ev;
+      const key = selector + "|" + ev + (prevent_default ? "|intercept" : "");
       if (subscriptions.has(key)) continue;
       let last = 0;
       const handler = (e) => {
+        const el = e.target instanceof Element ? e.target : null;
+        // Matching runs on the nearest ancestor so a click on <a><span>text</span></a>
+        // still counts as a click on the link.
+        let match = el;
+        if (selector && selector !== "*" && el) {
+          try { match = el.closest(selector); } catch { match = null; }
+        }
+        if (prevent_default) {
+          if (selector && selector !== "*" && !match) return; // not ours: leave the page alone
+          e.preventDefault();
+        }
         const now = Date.now();
         if (throttle_ms && now - last < throttle_ms) return;
         last = now;
-        const el = e.target instanceof Element ? e.target : null;
-        iframe.contentWindow.postMessage(
-          { pyodex: true, type: "page.event", payload: { selector, event: ev, target: el ? desc(el) : null } },
-          "*"
-        );
+        const payload = { selector, event: ev, target: match ? desc(match) : null,
+                          intercepted: !!prevent_default };
+        if (prevent_default && match) {
+          // The handler in Python cannot ask the DOM anymore: the page may already be
+          // moving on, so capture what the decision depends on.
+          payload.href = match.tagName === "A" ? match.href : match.getAttribute("href") || "";
+          payload.text = (match.innerText || match.textContent || "").trim().slice(0, 200);
+          payload.tag = match.tagName.toLowerCase();
+        }
+        iframe.contentWindow.postMessage({ pyodex: true, type: "page.event", payload }, "*");
       };
       document.addEventListener(ev, handler, true);
       subscriptions.set(key, handler);
@@ -319,7 +335,11 @@
       } catch (e) {
         error = String(e && e.message || e);
       }
-      iframe.contentWindow.postMessage({ pyodex: true, type: "page.dom", id: msg.id, payload, error }, "*");
+      // `payload ?? null`: an op that returns nothing used to post `undefined`, and
+      // JSON.stringify(undefined) is undefined — which arrived in Python as None and
+      // crashed json.loads() with a PythonError in the overlay.
+      iframe.contentWindow.postMessage(
+        { pyodex: true, type: "page.dom", id: msg.id, payload: payload ?? null, error }, "*");
     } else if (msg.type === "page.events") {
       subscribeEvents(msg.payload || {});
     } else if (msg.type === "page.pointer") {

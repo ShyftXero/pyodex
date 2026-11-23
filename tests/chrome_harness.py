@@ -91,6 +91,7 @@ ARTICLE_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8">
     <p>Content scripts run in an isolated world; the page keeps its own globe, its own prototypes, its own idea of what <code>Array.isArray</code> means.</p>
     <p>That isolation is the point, but it is also why a helper written for one realm so often silently does nothing in the other.</p>
     <p>The practical consequence is that an extension which respects the boundary must send messages, not share memory, and must expect nothing to be synchronous.</p>
+    <p class="next"><a id="next-article" href="/article/2">Continue reading: Message Ports</a></p>
   </article>
   <aside id="ad-slot">SPONSORED · Buy something you do not need</aside>
   <footer>© field guide</footer>

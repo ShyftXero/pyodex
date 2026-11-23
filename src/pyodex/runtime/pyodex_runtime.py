@@ -258,12 +258,22 @@ def watch_for(selector: str | None = None, *, id: str | None = None, url: str | 
     return deco
 
 
-def on_event(event: str, *, selector: str | None = None) -> Callable:
-    """Declare interest in a page event (`events.CLICK`, `events.NAVIGATE`, ...)."""
+def on_event(event: str, *, selector: str | None = None,
+             prevent_default: bool = False) -> Callable:
+    """Declare interest in a page event (`events.CLICK`, `events.NAVIGATE`, ...).
+
+    `prevent_default=True` intercepts the event: the page-side listener calls
+    `preventDefault()` **synchronously at capture time** and then hands the details to
+    Python. That ordering is the whole trick — Python is asynchronous, so a handler that
+    decided later could never cancel the navigation. Interception therefore means "the
+    browser will not act; Python will", which is exactly why the payload carries the
+    resolved `href` and text: the handler needs to know what it just took over.
+    """
 
     def deco(fn: Callable) -> Callable:
         DECLARATIONS["on_event"].append(
-            {"event": str(event), "selector": selector, "fn": fn.__name__, "callable": fn})
+            {"event": str(event), "selector": selector, "fn": fn.__name__,
+             "prevent_default": bool(prevent_default), "callable": fn})
         return fn
 
     return deco
@@ -380,12 +390,13 @@ async def dispatch() -> dict:
             _invoke(decl["callable"])
             fired.append(decl["fn"])
 
-    groups: dict[tuple[str | None, str], list[Callable]] = {}
+    groups: dict[tuple[str | None, str, bool], list[Callable]] = {}
     for decl in DECLARATIONS["on_event"]:
         event = decl["event"].split(".")[-1]
-        groups.setdefault((decl.get("selector"), event), []).append(decl["callable"])
-    for (selector, event), fns in groups.items():
-        page.subscribe(selector or "*", [event], throttle_ms=50)
+        key = (decl.get("selector"), event, bool(decl.get("prevent_default")))
+        groups.setdefault(key, []).append(decl["callable"])
+    for (selector, event, prevent_default), fns in groups.items():
+        page.subscribe(selector or "*", [event], throttle_ms=50, prevent_default=prevent_default)
 
         def handler(payload: Any, fns: list[Callable] = fns) -> None:
             for f in fns:
@@ -655,6 +666,24 @@ class Page:
         if not engine_mode():
             listen(window, "message", self._on_message)
 
+    @staticmethod
+    def _payload_of(data: Any, default: Any = None) -> Any:
+        """Decode a message payload, tolerating `undefined`.
+
+        JS `undefined` becomes Python `None`, and `json.loads(None)` raises — which
+        surfaced as a PythonError panel over a working page.
+        """
+        raw = getattr(data, "payload", None)
+        if raw is None:
+            return default
+        text = js.JSON.stringify(raw)
+        if text is None:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:  # noqa: BLE001
+            return default
+
     def _on_message(self, ev: Any) -> None:
         data = ev.data
         try:
@@ -663,7 +692,7 @@ class Page:
         except AttributeError:
             return
         if getattr(data, "type", None) == "page.event":
-            payload = json.loads(js.JSON.stringify(data.payload))
+            payload = self._payload_of(data, {})
             for h in list(self._event_handlers):
                 h(payload)
             return
@@ -672,7 +701,7 @@ class Page:
             self._last_error = str(err)
         fut = self._pending.pop(int(data.id), None) if hasattr(data, "id") else None
         if fut and not fut.done():
-            fut.set_result(json.loads(js.JSON.stringify(data.payload)))
+            fut.set_result(self._payload_of(data))
 
     def _send(self, type_: str, payload: Any = None, *, want_reply: bool = False) -> asyncio.Future | None:
         self._next += 1
@@ -802,11 +831,18 @@ class Page:
             await asyncio.sleep(0.1)
         return False
 
-    def subscribe(self, selector: str, events: list[str] | None = None, throttle_ms: int = 0) -> None:
-        """Stream host-page events to `on_page_event` listeners."""
+    def subscribe(self, selector: str, events: list[str] | None = None, throttle_ms: int = 0,
+                  prevent_default: bool = False) -> None:
+        """Stream host-page events to `on_page_event` listeners.
+
+        `prevent_default` cancels the browser's own action (a link's navigation, a form
+        submit) before Python hears about it — the only ordering that can work, since the
+        browser acts synchronously and Python does not.
+        """
         self._send("page.events", {"selector": selector,
                                    "events": events or ["click"],
-                                   "throttle_ms": throttle_ms})
+                                   "throttle_ms": throttle_ms,
+                                   "prevent_default": bool(prevent_default)})
 
     def on_page_event(self, fn: Callable[[dict], None]) -> Callable[[dict], None]:
         """Register a listener for host-page events. Returns fn for chaining."""
@@ -1550,6 +1586,24 @@ class WebSocketClient:
         if state["error"]:
             raise ConnectionError(f"{state['error']}: {url}")
         return cls(raw)
+
+    @staticmethod
+    def _payload_of(data: Any, default: Any = None) -> Any:
+        """Decode a message payload, tolerating `undefined`.
+
+        JS `undefined` becomes Python `None`, and `json.loads(None)` raises — which
+        surfaced as a PythonError panel over a working page.
+        """
+        raw = getattr(data, "payload", None)
+        if raw is None:
+            return default
+        text = js.JSON.stringify(raw)
+        if text is None:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:  # noqa: BLE001
+            return default
 
     def _on_message(self, ev: Any) -> None:
         data = ev.data
