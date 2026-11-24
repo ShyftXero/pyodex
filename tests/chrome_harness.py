@@ -1743,17 +1743,27 @@ def prepare(level: Level, work: Path, ports: dict) -> Path:
 
     if level.demo:
         src = ROOT / "examples" / "demos" / level.demo
-        shutil.copytree(src, dst)
+        # Never copy a stray build receipt into the source tree: the build output goes
+        # to work/dist/<slug>, and a demo dir that was built in place would otherwise
+        # seed that path with a non-pyodex dir the W6 overwrite-guard rightly refuses.
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("dist", "__pycache__"))
         return build_extension(dst, work / "dist" / level.slug)
     if level.name == "L6":
         src = FIXTURES / level.fixture
         shutil.copytree(src, dst)
         toml = dst / "pyodex.toml"
         base = f"http://127.0.0.1:{ports['http']}"
+        # bg.js no longer fetches a page's pyodide-lock.json live (that rootless trust
+        # was the W1 vuln): a cached blob must be authorised at build time, either from
+        # the bundled lock's baked digests or an explicit runtime_pin. The emulated CDN
+        # serves fabricated blobs absent from the real bundled lock, so pin both here,
+        # exactly as a real project would pin a blob whose digest it knows.
+        wheel_url = f"{base}/pyodide/v314.0.8/full/demo-1.0.0-py3-none-any.whl"
         toml.write_text(
             toml.read_text()
             + '\n[runtime_pins]\n'
             + f'"{base}/mp/micropython.wasm" = "{MP_SHA}"\n'
+            + f'"{wheel_url}" = "{BLOBS.digest("wheel")}"\n'
         )
         return build_extension(dst, work / "dist" / level.slug)
 
