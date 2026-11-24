@@ -5,7 +5,7 @@ OpenSSH in a Wasm worker, and answers its prompts from the page. OpenSSH handles
 the SSH protocol, encryption, and host-key checks; Secure Shell's socket code
 opens the connection through Chrome Direct Sockets. This file does not implement SSH.
 
-Start with SshTerminal.mount(), connect(), and disconnect(). The private helpers
+Start with SshTerminal.attach_to(), connect(), and disconnect(). The private helpers
 below handle terminal setup, browser prompts, and socket teardown.
 """
 
@@ -20,7 +20,7 @@ from pyodex import (
     asset_url,
     blocking,
     create_proxy,
-    document,
+    ext_page,
     import_js_module,
     js_callback,
     jsobj,
@@ -46,14 +46,12 @@ class SshTerminal:
 
     @classmethod
     @blocking  # App code calls this like an ordinary Python method.
-    async def mount(cls, selector):
-        """Load the bundled libraries and put a terminal in the given element."""
+    async def attach_to(cls, element):
+        """Load the bundled libraries and put a terminal inside the given element."""
         if (window.location.protocol != "isolated-app:" or not window.crossOriginIsolated
                 or not getattr(window, "TCPSocket", None)):
             raise RuntimeError("Install this as an IWA with Direct Sockets, not a regular tab or extension.")
-        container = document.querySelector(selector)
-        if not container:
-            raise ValueError(f"Terminal container not found: {selector}")
+        container = element.unwrap() if hasattr(element, "unwrap") else element
 
         hterm, lib, fs, process, wasi = await asyncio.gather(*(import_js_module(path) for path in (
             "vendor/hterm/index.js",
@@ -200,19 +198,19 @@ class _Prompt:
     """Wait for the user to answer an OpenSSH prompt outside terminal output."""
 
     def __init__(self, disconnect, focus_terminal):
-        self.dialog = document.element("pyodex-ssh-prompt")
-        self.title = document.element("pyodex-ssh-prompt-title")
-        self.target = document.element("pyodex-ssh-prompt-target")
-        self.message = document.element("pyodex-ssh-prompt-message")
-        self.answer = document.element("pyodex-ssh-prompt-answer")
+        self.dialog = ext_page.pyodex_ssh_prompt
+        self.title = ext_page.pyodex_ssh_prompt_title
+        self.target = ext_page.pyodex_ssh_prompt_target
+        self.message = ext_page.pyodex_ssh_prompt_message
+        self.answer = ext_page.pyodex_ssh_prompt_answer
         self.pending = None
 
-        @on(document.element("pyodex-ssh-prompt-form"), "submit", prevent_default=True)
+        @on(ext_page.pyodex_ssh_prompt_form, "submit", prevent_default=True)
         def accept(_event):
             self.finish(str(self.answer.value))
             focus_terminal()
 
-        @on(document.element("pyodex-ssh-prompt-cancel"), "click")
+        @on(ext_page.pyodex_ssh_prompt_cancel, "click")
         @on(self.dialog, "cancel", prevent_default=True)
         def cancel(_event):
             disconnect()

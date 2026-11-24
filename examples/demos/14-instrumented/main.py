@@ -15,13 +15,7 @@ available there — you would have to load the blob yourself (which is what this
 `tools/make_demo_wasm.py`: the plumbing is identical for a real payload.
 """
 
-import asyncio
-
-from pyodex_runtime import Overlay, Wasm, on, status
-
-ui = Overlay()
-card = ui.card("Demo 14 — instrumented wasm", width=400)
-card.body.innerText = "click Run"
+from pyodex import Wasm, ext_page, handler, status
 
 host_calls: list[int] = []
 
@@ -32,6 +26,7 @@ def host_log(value):
     return 0
 
 
+@handler  # main.html: onclick="run"
 async def run() -> None:
     guest = await Wasm.load("guest.wasm", host={"env": {"log": host_log}})
     pixels = await Wasm.load("color.wasm")
@@ -52,8 +47,8 @@ async def run() -> None:
     summary = trace.summary()
     pix = pixel_trace.summary()
     per_pixel = pix["total_us"] / max(pix["export_calls"], 1)
-    card.head.innerText = f"Demo 14 — {summary['export_calls']} traced calls"
-    card.body.innerText = "\n".join([
+    ext_page.title.text = f"Demo 14 — {summary['export_calls']} traced calls"
+    ext_page.body.text = "\n".join([
         trace.report(),
         f"host saw: {host_calls}",
         f"memory: {text}",
@@ -65,8 +60,3 @@ async def run() -> None:
         "counts are exact, single-call microseconds are not.",
     ])
     status(None)
-
-
-@on(ui.button("Run", top=16, right=16, id="run-btn"), "click")
-def clicked(_event):
-    asyncio.ensure_future(run())

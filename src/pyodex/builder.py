@@ -5,8 +5,8 @@ Project layout (input):
     myext/
     ├── pyodex.toml        # extension config
     ├── main.py           # Python entry point (runs inside Pyodide)
+    ├── main.html         # optional: markup injected into the overlay <body>
     ├── overlay.css       # optional: styles for the overlay page
-    ├── overlay.body.html # optional: markup injected into overlay <body>
     └── <extra files / packages listed in pyodex.toml>
 
 Output (dist/<slug>/) is a flat unpacked extension ready for "Load unpacked".
@@ -107,10 +107,37 @@ def _emit_injector(out: Path, cfg: ExtConfig, resources: list[str], *, page: str
     resources.append("injector.js")
 
 
+PAGE_BODY_NAMES = ("main.html", "overlay.body.html")
+
+
+def read_page_body(project: Path, cfg: ExtConfig) -> str:
+    """The overlay markup: `main.html`, else the historical `overlay.body.html`.
+
+    Implicit config only works when it is inspectable, so the name pair
+    (`main.py` + `main.html`) is the convention and the older name stays valid.
+    """
+    raw = cfg.overlay_body
+    if not raw:
+        for name in PAGE_BODY_NAMES:
+            path = project / name
+            if path.exists():
+                raw = path.read_text()
+                break
+    if not raw:
+        return ""
+
+    from .pagecheck import prepare
+
+    body, problems = prepare(raw, project, cfg.entry, cfg.python_files)
+    if problems:
+        detail = "\n".join(f"  {p}" for p in problems)
+        raise ValueError(f"page check failed:\n{detail}")
+    return body
+
+
 def _emit_overlay_page(out: Path, project: Path, cfg: ExtConfig, resources: list[str],
                        *, page: str = "overlay.html", scripts: str = "") -> None:
-    body = cfg.overlay_body or ((project / "overlay.body.html").read_text()
-                                if (project / "overlay.body.html").exists() else "")
+    body = read_page_body(project, cfg)
     css = cfg.overlay_css or ((project / "overlay.css").read_text()
                               if (project / "overlay.css").exists() else "")
     (out / page).write_text(_render((TEMPLATES / "overlay.html").read_text(), {
@@ -257,7 +284,7 @@ def _uses_dom(project: Path, cfg: ExtConfig) -> bool:
     """Does the app touch the page or draw UI? Decides whether it needs a page host."""
     import ast
 
-    DOM_NAMES = {"Overlay", "Page", "page", "ui", "document", "pyodex_mp"}
+    DOM_NAMES = {"Overlay", "Page", "page", "ext_page", "document", "pyodex_mp"}
     files = [project / cfg.entry] + [project / f for f in cfg.python_files]
     for f in files:
         try:

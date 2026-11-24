@@ -1,0 +1,4 @@
+[extension]
+name = "L34 Dev"
+matches = ["<all_urls>"]
+http = false

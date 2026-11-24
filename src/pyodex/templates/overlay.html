@@ -27,6 +27,12 @@
       opacity: 0.9;
     }
     #pyodex-status.hidden { display: none; }
+    /* An interactive app's own blocks take the pointer; empty overlay space does
+       not, so the page underneath keeps working. Same idea as Overlay widgets
+       opting in, applied to the markup the app ships. */
+    body[data-pyodex-interactive] > :not(#pyodex-status):not(#pyodex-error) {
+      pointer-events: auto;
+    }
     #pyodex-status.error { background: #b91c1c; }
     #pyodex-error {
       position: fixed;

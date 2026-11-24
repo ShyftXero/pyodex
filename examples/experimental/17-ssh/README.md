@@ -6,26 +6,55 @@ loads the bundled libraries, starts their worker, and handles the terminal and
 authentication prompts in Python. [The app](main.py) imports that local module:
 
 ```python
-from pyodex import start
+from pyodex import ext_page, start
 from secure_shell_plugin import SshTarget, SshTerminal
 
 @start  # Pyodex calls this after loading the app.
 def main():
-    terminal = SshTerminal.mount("#terminal")
+    terminal = SshTerminal.attach_to(ext_page.get("#terminal"))
     return terminal.connect(SshTarget("example.net", "alice"))
 ```
 
 Read `main.py` for the form and `SshTerminal` for the plugin API:
 
-- `mount()` puts the terminal in an existing page element. Call it once per page.
+- `attach_to(element)` puts the terminal inside an existing element. Call it once per
+  page. It takes the element, not a selector, so which document is decided before the
+  call — `ext_page.get()` is this app's page, `page.get()` is the host tab.
 - `connect()` runs the bundled OpenSSH client, shows its prompts, and returns its
   exit code. Call it again to reconnect after the session ends.
 - `disconnect()` cancels startup or ends the current session.
 
 OpenSSH handles encryption and host-key verification. The Python plugin connects
-it to the browser; it is not a second SSH client. `@blocking` lets the app use
-plain `def` without freezing the browser. The private `_SocketCleanup` helper is
-specific to Secure Shell 0.82, not something every pyodex plugin needs.
+it to the browser; it is not a second SSH client. The private `_SocketCleanup`
+helper is specific to Secure Shell 0.82, not something every pyodex plugin needs.
+
+### The `@blocking` recipe
+
+A browser cannot suspend Python, so an `async def` cannot simply be called like a
+function. pyodex's rule is narrow and worth copying:
+
+- **Plugin authors** put `@blocking` on the public methods that must be called from
+  ordinary app code: `attach_to`, `connect`, `disconnect`. It marks *this call is async
+  and I accept being suspended here*.
+- **App authors** never write it. `@start` and `@handler` already run on a suspendable
+  stack, so app code stays plain `def`.
+- If the stack is not suspendable, `@blocking` raises immediately with the reason
+  instead of hanging — a plain event listener is not a promising stack.
+
+```python
+from pyodex import blocking
+
+class Client:
+    @classmethod
+    @blocking                     # plugin side: expose an async implementation
+    async def attach_to(cls, element): ...
+
+    @blocking
+    async def connect(self, target): ...
+```
+
+Anything that calls `await` internally stays private. The decorator is the seam
+between "async inside" and "sync outside", and it belongs on the outer method.
 
 The TOML lists the local Python module in `python_files` and its files in
 `assets`. The only pieces from pyodex are generic asset lookup, ES module import,

@@ -293,7 +293,7 @@ myext/
 ├── pyodex.toml          # name, version, matches, url_filter, scripts, vendor, ...
 ├── main.py             # entry point, runs inside Pyodide (PEP 723 deps supported)
 ├── overlay.css         # optional styles for the overlay page
-├── overlay.body.html   # optional markup injected into the overlay <body>
+├── main.html           # optional markup (older name: overlay.body.html)
 └── pyodex.lock          # generated: pinned wasm32 wheel versions
 ```
 
@@ -624,7 +624,7 @@ uv run pyodex init --list-demos
 
 | # | Demo | Shows | pyodex features |
 |---|---|---|---|
-| 01 | `01-minimal-ui` | render, react, count | `Overlay.card/badge/button`, `@on` |
+| 01 | `01-minimal-ui` | render, react, count | `main.html`, `ext_page`, `@handler`, `onclick` sugar |
 | 02 | `02-price-compare` | reading the page and remembering between visits | `@urlmatch` + `@watch_for`, `Page.text/attr`, `storage_get/set` |
 | 03 | `03-anti-phishing` | analysis in Python with explainable reasons | `Page.attr` (bulk), edit distance, `Overlay.card` |
 | 04 | `04-password-manager` | credential store + autofill | `Page.fill({...})`, `Overlay.input`, `keep_alive` |
@@ -642,20 +642,27 @@ uv run pyodex init --list-demos
 | 16 | `16-ui-tour` | the UI vocabulary, and what CSS owns | `el()`, `panel(cls=…)`, `overlay.css` |
 | — | `12-speech` | *planned:* offline speech-to-text in-browser | tracked in issue #3 (Cactus Whistle) |
 
-Demo 01 — the smallest thing that works:
+Demo 01 — the smallest thing that works. The markup names the handler:
+
+```html
+<article class="card">
+  <h1>Demo 01 — minimal UI</h1>
+  <p id="badge" class="badge">0 clicks</p>
+</article>
+<button id="demo-btn" onclick="clicked">Click me</button>
+```
 
 ```python
-from pyodex_runtime import Overlay, on
+from pyodex import ext_page, handler
 
-ui = Overlay()
-card = ui.card("Demo 01 — minimal UI")
-badge = ui.badge("0 clicks")
-btn = ui.button("Click me", top=16, right=16, id="demo-btn")
-
-@on(btn, "click")
-def clicked(_event):
-    badge.innerText = "1 click"
+@handler                     # main.html: onclick="clicked"
+def clicked():
+    ext_page.badge.text = "1 click"
 ```
+
+The build rewrites `onclick="clicked"` into `pyodex-click="clicked"` (MV3 blocks
+inline JavaScript, so only a handler *name* is allowed) and checks the name against
+`@handler` before shipping.
 
 Demo 02 — boot only where it matters, then remember:
 
@@ -775,6 +782,7 @@ in-page logic, not for pulling in the world.
 
 - [`docs/chrome-api-coverage.md`](docs/chrome-api-coverage.md) — every chrome.* namespace: wrapped, exercised, or a stated gap.
 
+- [`docs/ergonomics.md`](docs/ergonomics.md) — the authoring rules (jQuery's fluency without its mush), the `ext_page`/`page` surface, and what was rejected.
 - [`docs/prior-art.md`](docs/prior-art.md) — what people dislike about Python-in-the-browser, mapped to our answers.
 - [`docs/lessons-from-exploit-research.md`](docs/lessons-from-exploit-research.md) — what a CSP/worker investigation actually bought (a runtime tier, an upstream ask, two policies) and what it did not.
 

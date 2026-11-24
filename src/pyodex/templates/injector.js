@@ -272,35 +272,110 @@
   }
 
   // ---- content-script <-> overlay bridge -------------------------------- //
+
+  // ---- locators --------------------------------------------------------- //
+  // A CSS selector breaks when a site redesigns. These match on what the element
+  // *is* (role, name, text) at dispatch time, so a re-render cannot unbind them.
+  const IMPLICIT_ROLES = { a: "link", button: "button", select: "combobox", textarea: "textbox" };
+
+  function roleOf(el) {
+    const explicit = el.getAttribute && el.getAttribute("role");
+    if (explicit) return explicit.trim().split(/\s+/)[0];
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input") {
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      if (type === "submit" || type === "button" || type === "reset") return "button";
+      if (type === "checkbox") return "checkbox";
+      if (type === "radio") return "radio";
+      if (type === "search") return "searchbox";
+      return "textbox";
+    }
+    if (/^h[1-6]$/.test(tag)) return "heading";
+    if (tag === "img") return "img";
+    return IMPLICIT_ROLES[tag] || null;
+  }
+
+  function accessibleName(el) {
+    const label = el.getAttribute && el.getAttribute("aria-label");
+    if (label && label.trim()) return label.trim();
+    const labelled = el.getAttribute && el.getAttribute("aria-labelledby");
+    if (labelled) {
+      const parts = labelled.split(/\s+/)
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .map((node) => (node.innerText || node.textContent || "").trim())
+        .filter(Boolean);
+      if (parts.length) return parts.join(" ");
+    }
+    return (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function matchesLocator(el, loc) {
+    if (!loc) return false;
+    if (loc.selector) {
+      try { return el.matches(loc.selector); } catch { return false; }
+    }
+    if (loc.testid) {
+      return el.getAttribute("data-testid") === loc.testid ||
+             el.getAttribute("data-test") === loc.testid;
+    }
+    if (loc.text) {
+      return (el.innerText || el.textContent || "")
+        .replace(/\s+/g, " ").includes(String(loc.text));
+    }
+    if (loc.role) {
+      if (roleOf(el) !== loc.role) return false;
+      if (!loc.name) return true;
+      return accessibleName(el).toLowerCase() === String(loc.name).trim().toLowerCase();
+    }
+    return false;
+  }
+
+  // Walk up from the event target: a click on <button><span>Buy</span></button>
+  // belongs to the button.
+  function closestMatch(target, match) {
+    if (!target) return null;
+    const locators = match && match.any_of ? match.any_of : [match];
+    for (const loc of locators) {
+      for (let el = target; el && el.nodeType === 1; el = el.parentElement) {
+        if (matchesLocator(el, loc)) return el;
+      }
+    }
+    return null;
+  }
+
   const subscriptions = new Map();
-  function subscribeEvents({ selector, events = ["click"], throttle_ms = 0, prevent_default = false }) {
+  function subscribeEvents({ selector, match, binding, events = ["click"], throttle_ms = 0,
+                            prevent_default = false }) {
+    const locator = match || (selector && selector !== "*" ? { selector } : null);
+
     for (const ev of events) {
-      const key = selector + "|" + ev + (prevent_default ? "|intercept" : "");
+      const key = (binding != null ? "b" + binding : selector || "*") +
+                  "|" + ev + (prevent_default ? "|intercept" : "");
       if (subscriptions.has(key)) continue;
       let last = 0;
       const handler = (e) => {
         const el = e.target instanceof Element ? e.target : null;
         // Matching runs on the nearest ancestor so a click on <a><span>text</span></a>
         // still counts as a click on the link.
-        let match = el;
-        if (selector && selector !== "*" && el) {
-          try { match = el.closest(selector); } catch { match = null; }
-        }
-        if (prevent_default) {
-          if (selector && selector !== "*" && !match) return; // not ours: leave the page alone
-          e.preventDefault();
-        }
+        const hit = locator ? closestMatch(el, locator) : el;
+        // A locator that did not match is somebody else's event: say nothing and
+        // leave the browser's default alone.
+        if (locator && !hit) return;
+        if (prevent_default) e.preventDefault();
         const now = Date.now();
         if (throttle_ms && now - last < throttle_ms) return;
         last = now;
-        const payload = { selector, event: ev, target: match ? desc(match) : null,
+        const payload = { event: ev, target: hit ? desc(hit) : null,
                           intercepted: !!prevent_default };
-        if (prevent_default && match) {
+        if (selector) payload.selector = selector;
+        if (binding != null) payload.binding = binding;
+        if (prevent_default && hit) {
           // The handler in Python cannot ask the DOM anymore: the page may already be
           // moving on, so capture what the decision depends on.
-          payload.href = match.tagName === "A" ? match.href : match.getAttribute("href") || "";
-          payload.text = (match.innerText || match.textContent || "").trim().slice(0, 200);
-          payload.tag = match.tagName.toLowerCase();
+          payload.href = hit.tagName === "A" ? hit.href : hit.getAttribute("href") || "";
+          payload.text = (hit.innerText || hit.textContent || "").trim().slice(0, 200);
+          payload.tag = hit.tagName.toLowerCase();
         }
         iframe.contentWindow.postMessage({ pyodex: true, type: "page.event", payload }, "*");
       };

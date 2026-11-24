@@ -12,31 +12,24 @@ asleep, and never delays a request through a Python callback.
 
 import asyncio
 
-from pyodex_runtime import Overlay, chrome, fetch_text, on, status
+from pyodex import chrome, ext_page, fetch_text, handler, status
 
-ui = Overlay()
-card = ui.card("Demo 10 — network", width=360)
-card.body.innerText = "click Run"
 seen = {"n": 0, "lines": []}
 
 
 def render() -> None:
     lines = seen["lines"] + [f"webRequest: {seen['n']} observed"]
-    card.body.innerText = "\n".join(lines)
+    ext_page.body.text = "\n".join(lines)
 
 
 @chrome.on("webRequest.onBeforeRequest")
 def request_seen(args):
     seen["n"] += 1
-    ui.badge(f"{seen['n']} req", top=16, left=16)
+    ext_page.badge.text = f"{seen['n']} req"
     render()
 
 
-@on(ui.button("Run", top=16, right=16, id="run-btn"), "click")
-def clicked(_event):
-    asyncio.ensure_future(run())
-
-
+@handler  # main.html: onclick="run"
 async def run() -> None:
     lines = seen["lines"] = ["starting…"]
     render()

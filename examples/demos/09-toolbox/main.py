@@ -7,21 +7,12 @@ The `cookies`, `downloads`, `bookmarks` and `history` permissions are added by t
 because this file mentions them. Nothing in a manifest was edited by hand.
 """
 
-import asyncio
+from pyodex import chrome, ext_page, handler, status
 
-from pyodex_runtime import Overlay, chrome, on, status
-
-ui = Overlay()
-card = ui.card("Demo 09 — toolbox", width=360)
-card.body.innerText = "click Run"
 lines: list[str] = []
 
 
-@on(ui.button("Run", top=16, right=16, id="run-btn"), "click")
-def clicked(_event):
-    asyncio.ensure_future(run())
-
-
+@handler  # main.html: onclick="run"
 async def run() -> None:
     lines.clear()
     url = await js_url()
@@ -61,7 +52,7 @@ async def run() -> None:
         # Unconfigured OAuth must say so in words a developer can act on.
         lines.append(f"identity: {str(e)[:90]}")
 
-    card.body.innerText = "\n".join(lines)
+    ext_page.body.text = "\n".join(lines)
     status(None)
 
 

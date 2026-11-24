@@ -45,6 +45,8 @@ async function boot() {
   setStatus("Running main.py…");
   await mp.runPythonAsync(await text("app/main.py"));
   status?.classList.add("hidden");
+  // Same readiness signal as the Pyodide bootstrap: static markup is not readiness.
+  document.documentElement.dataset.pyodexReady = "1";
 }
 
 boot().catch((e) => window.pyodexReportError(String((e && e.message) || e)));

@@ -50,6 +50,23 @@ def _cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_explain(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from .explain import render, report
+
+    data = report(Path(args.dir).resolve())
+    print(_json.dumps(data, indent=2) if args.json else render(data))
+    return 1 if data["problems"] else 0
+
+
+def _cmd_dev(args: argparse.Namespace) -> int:
+    from .dev import watch
+
+    return watch(Path(args.dir).resolve(), Path(args.out).resolve() if args.out else None,
+                 interval=args.interval, once=args.once)
+
+
 def _cmd_zip(args: argparse.Namespace) -> int:
     from .builder import store_report
 
@@ -188,6 +205,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--out")
     s.add_argument("--allow-bad", action="store_true", help="build even with known-incompatible packages")
     s.set_defaults(fn=_cmd_build)
+
+    s = sub.add_parser("explain", help="print what the build decides, with file:line")
+    s.add_argument("dir")
+    s.add_argument("--json", action="store_true", help="machine-readable receipt")
+    s.set_defaults(fn=_cmd_explain)
+
+    s = sub.add_parser("dev", help="rebuild in place on change (load unpacked once)")
+    s.add_argument("dir")
+    s.add_argument("--out")
+    s.add_argument("--interval", type=float, default=0.5, help="seconds between change checks")
+    s.add_argument("--once", action="store_true", help="rebuild once and exit")
+    s.set_defaults(fn=_cmd_dev)
 
     s = sub.add_parser("zip", help="build and zip extension")
     s.add_argument("dir")

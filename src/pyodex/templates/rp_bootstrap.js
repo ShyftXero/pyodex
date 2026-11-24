@@ -94,6 +94,8 @@ async function boot() {
     throw e;
   }
   status?.classList.add("hidden");
+  // Same readiness signal as the Pyodide bootstrap: static markup is not readiness.
+  document.documentElement.dataset.pyodexReady = "1";
 }
 
 boot().catch((e) => window.pyodexReportError(String((e && e.message) || e)));

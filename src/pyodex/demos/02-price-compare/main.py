@@ -3,17 +3,15 @@
 What it shows: declarative boot (@urlmatch + @watch_for), reading the host page,
 and persisting state between visits with chrome.storage.
 
-pyodex features: @urlmatch, @watch_for, Page.text_of / Page.attr, storage_get /
-storage_set, Overlay.card. No network: it compares what your own browsing found.
+pyodex features: main.html, ext_page, @urlmatch, @watch_for, page.attr / page.text,
+storage_get / storage_set. No network: it compares what your own browsing found.
 """
 
 import asyncio
 import json
 
-from pyodex_runtime import Overlay, Page, keep_alive, status, storage_get, storage_set, urlmatch, watch_for
+from pyodex import ext_page, keep_alive, page, status, storage_get, storage_set, urlmatch, watch_for
 
-ui = Overlay()
-page = Page()
 STORE = "demo02_prices"
 
 
@@ -51,8 +49,7 @@ async def collect() -> None:
     cheapest_site = min(data, key=lambda k: data[k]["price"])
     cheapest = data[cheapest_site]
 
-    card = ui.card("Demo 02 — price compare")
     lines = [f"{v['item']}: {v['price']:.2f}  ({k.split('/')[2]})" for k, v in sorted(data.items(), key=lambda kv: kv[1]["price"])]
-    card.body.innerText = "\n".join(lines) + f"\n\ncheapest: {cheapest['price']:.2f} at {cheapest_site.split('/')[2]}"
-    ui.badge(f"cheapest {cheapest['price']:.2f}", top=16, right=16)
+    ext_page.body.text = "\n".join(lines) + f"\n\ncheapest: {cheapest['price']:.2f} at {cheapest_site.split('/')[2]}"
+    ext_page.badge.text = f"cheapest {cheapest['price']:.2f}"
     status(None)

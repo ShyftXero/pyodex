@@ -2,7 +2,7 @@
 
 **What it demonstrates.** The smallest useful pyodex app: render a card, count clicks, react to them. No host-page access at all — this is the overlay alone.
 
-**pyodex features.** `Overlay.card`, `Overlay.badge`, `Overlay.button`, `@on`
+**pyodex features.** `main.html`, `ext_page` (strict element access, attribute form), `@handler`, and the `onclick` sugar rewritten at build time
 
 **How it is verified.** Harness level L14 — builds, boots, paints, and the click handler updates the badge.
 
@@ -16,34 +16,41 @@ boot = "user"
 http = false
 ```
 
+```html
+<!-- main.html: the page says what it does; the value is a handler name -->
+<article class="card">
+  <h1>Demo 01 — minimal UI</h1>
+  <p id="badge" class="badge">0 clicks</p>
+  <p id="body">Python is running in this tab.<br>Click the button.</p>
+</article>
+
+<button id="demo-btn" onclick="clicked">Click me</button>
+```
+
 ```python
-"""Demo 01 — minimal UI.
+"""main.py — behavior only; no layout and no element ids to repeat."""
 
-What it shows: the whole loop an extension needs — render, react, count.
-pyodex features: Overlay.card / badge / button, @on, and a dict-free event handler.
-Nothing here touches the host page: it is a self-contained overlay app.
-"""
-
-from pyodex_runtime import Overlay, on, status
-
-ui = Overlay()
-card = ui.card("Demo 01 — minimal UI")
-badge = ui.badge("0 clicks")
-btn = ui.button("Click me", top=16, right=16, id="demo-btn")
-
-card.body.innerText = "Python is running in this tab.\nClick the button."
+from pyodex import ext_page, handler, start, status
 
 clicks = 0
 
 
-@on(btn, "click")
-def clicked(_event):
+@start
+def main():
+    status(None)
+
+
+@handler  # main.html: onclick="clicked"
+def clicked():
     global clicks
     clicks += 1
-    badge.innerText = f"{clicks} click{'s' if clicks != 1 else ''}"
-    card.body.innerText = f"You clicked {clicks} time(s).\nStill Python, still in this tab."
-    status(None)
+    ext_page.badge.text = f"{clicks} click{'s' if clicks != 1 else ''}"
+    ext_page.body.text = f"You clicked {clicks} time(s).\nStill Python, still in this tab."
 ```
+
+`ext_page.badge` is the element with `id="badge"`; `-` becomes `_` in the attribute
+form and `ext_page["class"]` is the escape for anything that mangles. Layout and
+appearance live in `overlay.css`, not in the Python.
 
 Build and load it:
 

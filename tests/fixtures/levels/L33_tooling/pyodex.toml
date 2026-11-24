@@ -1,0 +1,4 @@
+[extension]
+name = "L33 Tooling"
+matches = ["<all_urls>"]
+http = false

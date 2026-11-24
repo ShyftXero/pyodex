@@ -8,38 +8,29 @@ Notice there is no manifest editing: `chrome.alarms` in the code adds the `alarm
 permission at build time, and the same for `contextMenus` and `notifications`.
 """
 
-import asyncio
+from pyodex import chrome, ext_page, handler, status
 
-from pyodex_runtime import Overlay, chrome, on, status
-
-ui = Overlay()
-card = ui.card("Demo 08 — setters", width=340)
-card.body.innerText = "setting up…"
 ticks = {"n": 0}
 
 
 @chrome.on("alarms.onAlarm")
 def alarm_fired(args):
     ticks["n"] += 1
-    card.body.innerText = f"alarm fired {ticks['n']}×\n(alarms.onAlarm)"
-    ui.badge(f"{ticks['n']} alarm(s)", top=16, left=16)
+    ext_page.body.text = f"alarm fired {ticks['n']}×\n(alarms.onAlarm)"
+    ext_page.badge.text = f"{ticks['n']} alarm(s)"
 
 
 @chrome.on("contextMenus.onClicked")
 def menu_clicked(args):
-    card.body.innerText = f"menu clicked\ncontextMenus.onClicked"
+    ext_page.body.text = f"menu clicked\ncontextMenus.onClicked"
 
 
 @chrome.on("notifications.onClicked")
 def notification_clicked(args):
-    card.body.innerText = "notification clicked\nnotifications.onClicked"
+    ext_page.body.text = "notification clicked\nnotifications.onClicked"
 
 
-@on(ui.button("Set up", top=16, right=16, id="setup-btn"), "click")
-def clicked(_event):
-    asyncio.ensure_future(setup())
-
-
+@handler  # main.html: onclick="setup"
 async def setup() -> None:
     lines = []
 
@@ -63,5 +54,5 @@ async def setup() -> None:
     except Exception as e:  # noqa: BLE001
         lines.append(f"notifications: {type(e).__name__}")
 
-    card.body.innerText = "\n".join(lines) + "\n\nwaiting for an alarm…"
+    ext_page.body.text = "\n".join(lines) + "\n\nwaiting for an alarm…"
     status(None)

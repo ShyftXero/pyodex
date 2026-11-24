@@ -41,7 +41,7 @@ EVENT_NAMES = {
     "TAB_HIDDEN": "tab.hidden",
 }
 
-KNOWN = {"on_load", "watch_for", "on_event", "urlmatch"}
+KNOWN = {"on_load", "watch_for", "on_event", "on_page", "urlmatch"}
 
 # Characters that only make sense in a regular expression. A pattern containing
 # one is treated as a regex; otherwise `://` means URL prefix, and anything else
@@ -94,6 +94,7 @@ class Declarations:
     on_load: bool = False
     triggers: list[dict] = field(default_factory=list)  # {"selector": ..., "url": ...}
     events: list[dict] = field(default_factory=list)  # {"event": ..., "selector": ...}
+    page_bindings: list[dict] = field(default_factory=list)  # @on_page locators
     url_rules: list[dict] = field(default_factory=list)  # classified @urlmatch patterns
     problems: list[str] = field(default_factory=list)
 
@@ -102,6 +103,7 @@ class Declarations:
             "on_load": self.on_load,
             "triggers": self.triggers,
             "events": self.events,
+            "page_bindings": self.page_bindings,
             "url_rules": self.url_rules,
             "problems": self.problems,
         }
@@ -201,6 +203,17 @@ def extract(paths: list[Path]) -> Declarations:
                             continue
                         if rule not in url_rules:
                             url_rules.append(rule)
+                elif name == "on_page":
+                    event = args.get("event") or args.get("arg0")
+                    if not event:
+                        out.problems.append(f"{path.name}: @on_page needs an event name")
+                        continue
+                    entry = {"event": str(event), "fn": getattr(node, "name", ""),
+                             "line": getattr(node, "lineno", 0)}
+                    for key in ("selector", "testid", "role", "name", "text", "any_of"):
+                        if key in args:
+                            entry[key] = args[key]
+                    out.page_bindings.append(entry)
                 else:  # on_event
                     event = args.get("event") or args.get("arg0")
                     if not event:

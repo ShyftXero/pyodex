@@ -9,13 +9,7 @@ instead of a JS one — you can stand in for any host function the module calls.
 needs no compiler. The same API takes a real blob (a game, a codec, a model runtime).
 """
 
-import asyncio
-
-from pyodex_runtime import Overlay, Wasm, on, status
-
-ui = Overlay()
-card = ui.card("Demo 12 — wasm from Python", width=360)
-card.body.innerText = "loading guest.wasm…"
+from pyodex import Wasm, ext_page, handler, status
 
 host_calls: list[int] = []
 export_calls: list[str] = []
@@ -27,6 +21,7 @@ def host_log(value):
     return 0
 
 
+@handler  # main.html: onclick="run"
 async def run() -> None:
     guest = await Wasm.load("guest.wasm", host={"env": {"log": host_log}})
     guest.instrument(lambda name, args, result: export_calls.append(name))
@@ -36,16 +31,11 @@ async def run() -> None:
     text = guest.memory.cstring(0)
     guest.run()  # calls env.log(42) -> the Python function above
 
-    card.head.innerText = f"Demo 12 — add(2, 3) = {total}"
-    card.body.innerText = "\n".join([
+    ext_page.title.text = f"Demo 12 — add(2, 3) = {total}"
+    ext_page.body.text = "\n".join([
         f"exports: {', '.join(guest.exports)}",
         f"memory[0:]: {text}",
         f"host saw: {host_calls}",
         f"instrumented calls: {export_calls}",
     ])
     status(None)
-
-
-@on(ui.button("Run", top=16, right=16, id="run-btn"), "click")
-def clicked(_event):
-    asyncio.ensure_future(run())

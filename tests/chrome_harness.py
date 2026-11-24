@@ -3,6 +3,11 @@
 Levels (each a gate; a later level failing is a bug, an earlier one failing is
 a regression):
 
+    L34     dev          rebuild in place: same origin, new files
+    L33     tooling      explain describes the app that actually runs
+    L32     page         on_page locators on a page you do not own
+    L31     attach       attach_when: late elements attach and release
+    L30     authoring    markup bindings, ext_page, strict lookups
     L1      trivial      content script, launcher, Pyodide boot, overlay DOM
     L2      quickstart   dependencies, compute, HTTP, async
     L3      tutorial     declarations, host-page DOM, persistence across reload
@@ -109,6 +114,14 @@ PHISH_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Links</t
   <a href="https://paypal.com.evil.example/">subdomain trick</a>
 </body></html>"""
 
+HOST_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Host</title></head>
+<body>
+  <h1>Shop</h1>
+  <button id="buy" aria-label="Buy now">Buy</button>
+  <button id="add">Add to cart</button>
+  <a id="promo" href="https://example.com/promo">Promo</a>
+</body></html>"""
+
 PLAIN_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plain</title></head>
 <body><h1>Nothing to see</h1><p id="plain">plain page</p></body></html>"""
 
@@ -159,6 +172,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/article/"):
             body = ARTICLE_PAGE.encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/hostpage"):
+            body = HOST_PAGE.encode()
             self.send_response(200)
             self.send_header("content-type", "text/html; charset=utf-8")
             self.send_header("content-length", str(len(body)))
@@ -361,6 +382,16 @@ LEVELS = [
           demo="03-anti-phishing"),
     Level("L17", "demo-04-password-manager", "", "demo 04: saves and fills credentials", 17, ("primary",),
           demo="04-password-manager"),
+    Level("L30", "l30-authoring", "L30_authoring",
+          "markup bindings, ext_page, strict lookups", 30, ("primary",)),
+    Level("L31", "l31-attach", "L31_attach",
+          "attach_when: late elements attach and release", 31, ("primary",)),
+    Level("L32", "l32-page", "L32_page",
+          "on_page locators: role, text, any_of, prevent_default", 32, ("primary",)),
+    Level("L33", "l33-tooling", "L33_tooling",
+          "explain describes the app that actually runs", 33, ("primary",)),
+    Level("L34", "l34-dev", "L34_dev",
+          "dev rebuilds in place: same extension origin, new files", 34, ("primary",)),
     Level("L29", "demo-16-ui-tour", "", "demo 16: UI vocabulary, layout in Python, states in CSS", 29, ("primary",),
           demo="16-ui-tour"),
     Level("L28", "demo-15-reading-mode", "", "demo 15: URL-gated Python rewrites an article", 28, ("primary",),
@@ -422,11 +453,20 @@ def click_launcher(page, slug: str) -> bool:
     ))
 
 
+def overlay_ready(frame) -> bool:
+    try:
+        return frame.evaluate("() => document.documentElement.dataset.pyodexReady === '1'")
+    except Exception:  # noqa: BLE001 - frame/navigation churn
+        return False
+
+
 def overlay_frame(page, timeout: int = BOOT_TIMEOUT):
     deadline = time.time() + timeout / 1000
     while time.time() < deadline:
         for frame in page.frames:
-            if "overlay.html" in (frame.url or ""):
+            # A check must not click before the binder is attached: static markup
+            # exists from the first parse, so presence is not readiness.
+            if "overlay.html" in (frame.url or "") and overlay_ready(frame):
                 return frame
         page.wait_for_timeout(200)
     return None
@@ -1345,7 +1385,14 @@ def check_l29(level, ctx, env, c: Checks) -> None:
     frame = overlay_frame(page)
     if not c.expect("overlay booted", frame is not None, "no overlay frame"):
         return
-    c.expect("panel rendered", bool(wait_for(lambda: frame.query_selector(".px-shell"), 60)), "no .px-shell")
+    # The markup is static now, so its presence no longer proves the interpreter is up.
+    # Wait for Python to paint the footer, which is what the old build signalled via the
+    # panel's existence.
+    ready = wait_for(lambda: "tabs" in (frame.evaluate(
+        "() => document.querySelector('#tabs')?.textContent || ''") or "") and frame.evaluate(
+        "() => document.querySelector('#tabs')?.textContent || ''"), 90)
+    c.expect("python painted the panel", bool(ready), f"tabs={ready!r}")
+    c.expect("panel rendered", bool(frame.query_selector(".px-shell")), "no .px-shell")
     c.expect("menu has four items", len(frame.query_selector_all(".px-item")) == 4,
              f"items={len(frame.query_selector_all('.px-item'))}")
 
@@ -1369,6 +1416,218 @@ def check_l29(level, ctx, env, c: Checks) -> None:
     c.expect("typing updates live state", "7 chars" in (footer or ""), f"footer={footer!r}")
 
 
+
+def check_l30(level, ctx, env, c: Checks) -> None:
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+
+    def text(selector):
+        try:
+            return frame.inner_text(selector)
+        except Exception:  # noqa: BLE001 - the frame is re-resolved between probes
+            return ""
+
+    ready = wait_for(lambda: text("#out") == "ready" and "ready")
+    c.expect("ext_page namespace painted", bool(ready), f"out={text('#out')!r}")
+    registered = wait_for(lambda: text("#names") and text("#names"))
+    c.expect("registry holds every @handler",
+             registered and all(n in registered for n in ("bump", "lookup_miss", "submit_form")),
+             f"names={registered!r}")
+
+    c.expect("build rewrote the sugar to a binding",
+             bool(frame.evaluate("() => document.body.innerHTML.includes('pyodex-click')")),
+             "pyodex-click attribute missing from the built page")
+    c.expect("no inline handler shipped",
+             not frame.evaluate("() => /\\son[a-z]+=/i.test(document.body.innerHTML)"),
+             "an on* attribute survived the build")
+
+    frame.click("#bump")
+    frame.click("#bump")
+    c.expect("markup binding fired twice",
+             bool(wait_for(lambda: text("#count") == "2" and "2")), f"count={text('#count')!r}")
+
+    frame.click("#go")
+    c.expect("submit bound and prevented",
+             bool(wait_for(lambda: text("#out").startswith("submitted:") and text("#out"))),
+             f"out={text('#out')!r}")
+    c.expect("submit read the field", text("#out") == "submitted:ada", f"out={text('#out')!r}")
+
+    frame.click("#bad")
+    c.expect("a JS error arrives as JsError",
+             bool(wait_for(lambda: text("#out").startswith("js:") and text("#out"))),
+             f"out={text('#out')!r}")
+
+    frame.click("#miss")
+    c.expect("strict lookup names the element",
+             bool(wait_for(lambda: "no element" in text("#out") and text("#out"))),
+             f"out={text('#out')!r} names={text('#names')!r}")
+
+
+def check_l31(level, ctx, env, c: Checks) -> None:
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+
+    def text(selector):
+        try:
+            return frame.inner_text(selector)
+        except Exception:  # noqa: BLE001 - frame re-resolved between probes
+            return ""
+
+    def panel():
+        try:
+            return frame.evaluate(
+                "() => {const e = document.getElementById('pyodex-error');"
+                " return e ? (e.textContent || '') : 'no-panel';}")
+        except Exception:  # noqa: BLE001 - the message must never raise
+            return "detached"
+    c.expect("booted", bool(wait_for(lambda: text("#log") == "ready" and "ready")),
+             f"log={text('#log')!r} panel={panel()!r}")
+
+    frame.click("#add")
+    c.expect("attached when the element appeared",
+             bool(wait_for(lambda: text("#log") == "attached" and "attached")), f"log={text('#log')!r}")
+
+    frame.click("#remove")
+    c.expect("released when the element left",
+             bool(wait_for(lambda: text("#log") == "released" and "released")), f"log={text('#log')!r}")
+
+    frame.click("#add")
+    c.expect("attaches again after a removal",
+             bool(wait_for(lambda: text("#log") == "attached" and "attached")), f"log={text('#log')!r}")
+
+
+def check_l32(level, ctx, env, c: Checks) -> None:
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/hostpage.html")
+    ok = bool(wait_for(lambda: click_launcher(page, level.slug) or None, 8))
+    c.expect("launcher injected", ok,
+             f"launcher not found (url={page.url!r})")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+
+    def text():
+        try:
+            return frame.inner_text("#log")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    c.expect("booted", bool(wait_for(lambda: text() == "ready" and "ready")), f"log={text()!r}")
+
+    page.click("#add")
+    c.expect("text locator matched",
+             bool(wait_for(lambda: text() == "added" and "added")),
+             f"log={text()!r}")
+
+    page.click("#buy")
+    c.expect("role+name locator matched",
+             bool(wait_for(lambda: text() == "bought" and "bought")), f"log={text()!r}")
+
+    before = page.url
+    page.click("#promo")
+    c.expect("prevent_default delivered the href",
+             bool(wait_for(lambda: text().startswith("promo:") and text())), f"log={text()!r}")
+    c.expect("navigation was cancelled", page.url == before, f"url={page.url!r}")
+
+
+def check_l33(level, ctx, env, c: Checks) -> None:
+    """`pyodex explain` is a receipt: its claims must match the running app."""
+    from pyodex.explain import report
+
+    data = report(FIXTURES / level.fixture)
+    bindings = {b["handler"] for b in data["page"]["bindings"]}
+    c.expect("explain lists the binding", bindings == {"run"}, f"bindings={bindings!r}")
+    c.expect("explain lists the handler", data["handlers"] == ["run"], f"handlers={data['handlers']!r}")
+    c.expect("explain lists the ids", set(data["page"]["ids"]) == {"out", "go"}, f"ids={data['page']['ids']!r}")
+    c.expect("explain has no problems", not data["problems"], f"problems={data['problems']!r}")
+
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+
+    def text():
+        try:
+            return frame.inner_text("#out")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    c.expect("the described app boots", bool(wait_for(lambda: text() == "ready" and "ready")),
+             f"out={text()!r}")
+
+    ids = frame.evaluate("() => Array.from(document.querySelectorAll('[id]')).map(e => e.id)")
+    c.expect("every id explain listed exists in the page",
+             set(data["page"]["ids"]).issubset(set(ids)), f"page ids={ids!r}")
+
+    frame.click("#go")
+    c.expect("the described handler runs", bool(wait_for(lambda: text() == "ran" and "ran")),
+             f"out={text()!r}")
+
+
+def check_l34(level, ctx, env, c: Checks) -> None:
+    """`pyodex dev` must update the extension without changing its identity.
+
+    The browser-observable part is the origin: a rebuild that deleted and recreated
+    the directory would give Chrome a different extension id, which is exactly the
+    "load unpacked again and lose your storage" failure the tool exists to avoid. So:
+    rebuild in place, then prove the same origin serves the new files.
+    """
+    from pyodex.dev import rebuild
+
+    page = ctx.new_page()
+    page.goto(f"{env['base']}/plain.html")
+    c.expect("launcher injected", click_launcher(page, level.slug), "launcher not found")
+    frame = overlay_frame(page)
+    if not c.expect("overlay booted", frame is not None, "no overlay frame"):
+        return
+    origin = (frame.url or "").rsplit("/", 1)[0]
+    c.expect("extension origin derived", origin.startswith("chrome-extension://"), origin)
+
+    def read(page_obj, selector):
+        try:
+            return page_obj.evaluate(
+                f"() => document.querySelector({selector!r})?.textContent || ''")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    c.expect("first build served", read(frame, "#marker") == "static-v1",
+             f"marker={read(frame, '#marker')!r}")
+    c.expect("python ran in the first build", read(frame, "#from-python") == "python-ran",
+             f"python={read(frame, '#from-python')!r}")
+
+    # The edit a developer would make, then the dev loop's single step.
+    inode_before = level.dist.stat().st_ino
+    (level.project / "main.html").write_text(
+        '<div id="marker">static-v2</div>\n<div id="from-python">waiting</div>\n')
+    rebuild(level.project, level.dist)
+
+    c.expect("the output directory was not recreated",
+             level.dist.stat().st_ino == inode_before,
+             f"inode changed: {inode_before} -> {level.dist.stat().st_ino}")
+    c.expect("the rebuilt package has the edit",
+             "static-v2" in (level.dist / "overlay.html").read_text(),
+             "overlay.html still has the old markup")
+
+    # A fresh navigation reads the extension's files from disk: no reinstall, no new id.
+    fresh = ctx.new_page()
+    fresh.goto(origin + "/overlay.html")
+    ok = wait_for(lambda: read(fresh, "#from-python") == "python-ran" and True, 90)
+    c.expect("the same origin boots the rebuilt app", bool(ok),
+             f"from-python={read(fresh, '#from-python')!r}")
+    c.expect("the same origin serves the new markup", read(fresh, "#marker") == "static-v2",
+             f"marker={read(fresh, '#marker')!r}")
+    fresh.close()
+
 CHECKS = {
     "L1": check_l1,
     "L2": check_l2,
@@ -1391,6 +1650,11 @@ CHECKS = {
     "L17": check_l17,
     "L18": check_l18,
     "L19": check_l19,
+    "L30": check_l30,
+    "L31": check_l31,
+    "L32": check_l32,
+    "L33": check_l33,
+    "L34": check_l34,
     "L20": check_l20,
     "L21": check_l21,
     "L22": check_l22,
@@ -1562,6 +1826,12 @@ def run_level(level: Level, env: dict, jobs_hint: str) -> tuple[bool, list[str]]
         built = prepare(level, work, ports)
     except Exception as e:  # noqa: BLE001
         return False, [f"{level.name} build: {type(e).__name__}: {e}"]
+
+    # Per-level, per-thread: the check may need the source project and the directory
+    # the browser actually loaded (the dev level rebuilds the latter in place).
+    level.work = work
+    level.project = work / (level.fixture or level.demo)
+    level.dist = Path(built)
 
     try:
         with sync_playwright() as pw:

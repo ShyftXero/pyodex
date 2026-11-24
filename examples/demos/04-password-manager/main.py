@@ -4,7 +4,7 @@ What it shows: credentials persisted in TWO places — an IndexedDB object store
 a JSON file on the persistent (IndexedDB-backed) disk — and autofill through the
 page bridge.
 
-pyodex features: @urlmatch + @watch_for, Overlay.card + Overlay.input,
+pyodex features: main.html + ext_page, @handler, @urlmatch + @watch_for,
 Page.fill(mapping), the persistent data dir (`pyodex_natural.config.data_dir`) with
 save(), and raw IndexedDB access from Python via the `js` bridge.
 
@@ -19,17 +19,13 @@ import asyncio
 import json
 
 import pyodex_natural as nat
-from pyodex_runtime import (Overlay, Page, chrome, js, js_callback, keep_alive, on,
-                            status, to_js, urlmatch, watch_for)
+from pyodex import chrome, ext_page, handler, page, status
+from pyodex_runtime import js, js_callback, keep_alive, to_js, urlmatch, watch_for
 
 VAULT = "demo04_vault"
 VAULT_FILE = f"{nat.config.data_dir}/demo04-vault.json"
 IDB_NAME = "demo04-vault"
 IDB_STORE = "entries"
-
-ui = Overlay()
-page = Page()
-
 
 def scramble(secret: str) -> str:
     """The 'encryption'. It is a string reversal, i.e. not encryption at all."""
@@ -136,45 +132,45 @@ async def save(site: str, user: str, secret: str) -> dict:
     return {"file": wrote_file, "indexeddb": wrote_idb, "stored": stored}
 
 
-async def ui_for_this_site() -> None:
+async def current_site() -> str:
     info = await page.info()
-    site = info["url"].split("?")[0].rsplit("/", 1)[0]
+    return info["url"].split("?")[0].rsplit("/", 1)[0]
+
+
+async def ui_for_this_site() -> None:
+    site = await current_site()
     data = await entries()
     saved = data.get(site)
+    ext_page.title.text = f"Demo 04 — {site.split('//')[-1][:40]}"
 
-    card = ui.card(f"Demo 04 — {site.split('//')[-1][:40]}")
     if saved:
-        card.body.innerText = (
+        ext_page.body.text = (
             f"saved for {saved['user']}\n"
             f"stored (reversed, not encrypted): {saved['stored']}\n"
             "persisted to: file + IndexedDB"
         )
-        btn = ui.button("Fill", top=16, right=16, id="fill-btn")
-
-        @on(btn, "click")
-        def _fill(_e):
-            asyncio.ensure_future(do_fill(site))
-
     else:
-        card.body.innerText = "No credentials saved for this site yet."
-        user_in = ui.input("username", id="vault-user", parent=card)
-        pass_in = ui.input("password", id="vault-pass", parent=card, type="password")
-        btn = ui.button("Save", top=16, right=16, id="save-btn")
+        ext_page.body.text = "No credentials saved for this site yet."
 
-        @on(btn, "click")
-        def _save(_e):
-            asyncio.ensure_future(do_save(site, user_in, pass_in))
-
+    # One markup, two states: the stylesheet owns what hidden means.
+    ext_page.save_form.hidden = bool(saved)
+    ext_page.save_btn.hidden = bool(saved)
+    ext_page.fill_btn.hidden = not saved
     status(None)
 
 
-async def do_save(site: str, user_in, pass_in) -> None:
-    res = await save(site, user_in.value or "user", pass_in.value or "")
+@handler  # main.html: onclick="do_save"
+async def do_save():
+    site = await current_site()
+    res = await save(site, ext_page.vault_user.value or "user",
+                     ext_page.vault_pass.value or "")
     await ui_for_this_site()
     status(f"saved: file={res['file']} indexeddb={res['indexeddb']} (reversed, not encrypted)")
 
 
-async def do_fill(site: str) -> None:
+@handler  # main.html: onclick="do_fill"
+async def do_fill():
+    site = await current_site()
     data = await entries()
     entry = data.get(site)
     if not entry:

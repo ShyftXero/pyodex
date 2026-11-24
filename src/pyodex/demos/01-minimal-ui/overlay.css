@@ -1,0 +1,18 @@
+/* Layout and appearance live here; the Python only decides what the text says. */
+.card {
+  position: fixed; top: 16px; left: 16px; z-index: 10;
+  max-width: 22rem; padding: 14px 16px; border-radius: 10px;
+  background: #18181b; color: #f5f7fa;
+  border: 2px solid #f43f5e; box-shadow: 0 4px 12px rgba(0, 0, 0, .25);
+  font: 14px/1.45 system-ui, sans-serif;
+}
+.card h1 { margin: 0 0 6px; font-size: 15px; font-weight: 650; }
+.card p { margin: 0; }
+.badge { color: #fda4af; font-variant-numeric: tabular-nums; }
+#demo-btn {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  padding: 10px 16px; border-radius: 8px; cursor: pointer;
+  border: 2px solid #f43f5e; background: #18181b; color: #fff;
+  font: 600 14px system-ui, sans-serif;
+}
+#demo-btn:hover { background: #27272a; }

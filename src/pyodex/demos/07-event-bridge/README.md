@@ -15,7 +15,7 @@ The build scans for `chrome.on("ns.event", ...)` and renders the list into the s
 worker, because MV3 only delivers events to listeners registered at top level — a
 worker will not wake for a listener added later. One line, both jobs.
 
-**pyodex features.** `chrome.on()`, `chrome.local`, `Overlay.card` / `badge`.
+**pyodex features.** `chrome.on()`, `chrome.local`, `main.html` + `ext_page` + `@handler`.
 
 **How it is verified.** Harness level L20 — the card waits for events, a click fires
 a real `chrome.storage` write, and the Python handler is asserted to have run and
@@ -32,52 +32,18 @@ http = false
 ```
 
 ```python
-"""Demo 07 — browser events, in Python.
-
-What it shows: the piece that makes this feel like an extension rather than a script
-— Python receiving platform events (`storage.onChanged`, `tabs.onUpdated`) instead of
-only calling APIs.
-
-pyodex features: `chrome.on(event, fn)`. Declaring the subscription at import time is
-what lets the build register the listener in the service worker; MV3 will not wake a
-worker for listeners added later.
-
-Fire one yourself: change any `chrome.storage` value (or open/close a tab) and watch
-the card.
-"""
-
-import asyncio
-import json
-
-from pyodex_runtime import Overlay, chrome, on, status
-
-ui = Overlay()
-card = ui.card("Demo 07 — event bridge")
-card.body.innerText = "waiting for events…"
-count = {"n": 0}
-btn = ui.button("Fire a storage event", top=16, right=16, id="fire-btn")
-
-
-@chrome.on("storage.onChanged")
-def storage_changed(args):
-    count["n"] += 1
-    detail = json.dumps(args)[:160] if args else "{}"
-    card.head.innerText = f"Demo 07 — {count['n']} event(s)"
-    card.body.innerText = f"storage.onChanged\n{detail}"
-    ui.badge(f"{count['n']} events", top=16, left=16)
-    status(None)
-
-
-@chrome.on("tabs.onUpdated")
-def tab_updated(args):
-    card.body.innerText = "tabs.onUpdated\n" + json.dumps(args)[:160]
-
-
-@on(btn, "click")
-def clicked(_event):
-    asyncio.ensure_future(trigger())
-
-
-async def trigger() -> None:
-    await chrome.local.set("demo07", str(count["n"]) + "-tick")
+# The app is `main.py` + `main.html` — read those files.
+# This README used to duplicate the source and drifted; it no longer does.
 ```
+
+**The new format.** The card, badge and button live in `main.html`, and the click is
+bound by the markup (`onclick="fire"` → `pyodex-click` at build time). Python holds
+behavior and state only:
+
+```python
+@handler  # main.html: onclick="fire"
+async def fire():
+    await chrome.local.set("demo07", str(count) + "-tick")
+```
+
+An `async def` handler is awaited by pyodex, so no `ensure_future` is needed.

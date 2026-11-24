@@ -1,0 +1,4 @@
+[extension]
+name = "L32 Page"
+matches = ["<all_urls>"]
+http = false

@@ -4,12 +4,14 @@
     <h1>SSH terminal</h1>
     <p>Demo 17 · OpenSSH WebAssembly · Chrome Direct Sockets</p>
   </header>
-  <form id="connection">
+  <!-- pyodex-submit.prevent: Python handles submit, the page does not navigate.
+       The attribute holds a handler name, never code: MV3 forbids inline JS. -->
+  <form id="connection" pyodex-submit.prevent="connect">
     <label>Host <input id="host" placeholder="example.net" required maxlength="253" spellcheck="false"></label>
     <label>User <input id="user" required maxlength="64" spellcheck="false" autocomplete="username"></label>
     <label>Port <input id="port" type="number" min="1" max="65535" value="22" required></label>
     <button id="connect" disabled>Connect</button>
-    <button id="disconnect" type="button" disabled>Disconnect</button>
+    <button id="disconnect" type="button" disabled pyodex-click="disconnect">Disconnect</button>
   </form>
   <p id="connection-status" role="status">Starting Python…</p>
   <div id="terminal" aria-label="SSH terminal"></div>

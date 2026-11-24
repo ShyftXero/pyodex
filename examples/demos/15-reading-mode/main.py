@@ -10,16 +10,25 @@ an overlay card so you can check its arithmetic against the page.
 """
 
 import asyncio
+import contextlib
 
-from pyodex_runtime import (Overlay, Page, chrome, events, fetch_text, on, on_event, status,
-                            urlmatch, watch_for)
+from pyodex import (
+    chrome,
+    events,
+    ext_page,
+    fetch_text,
+    on_event,
+    page,
+    start,
+    status,
+    urlmatch,
+    watch_for,
+)
 
-page = Page()
-# Informational overlay: `interactive=False` keeps the iframe click-through, so the page
-# stays usable — which matters here, because the point is clicking a link in the page.
-ui = Overlay(interactive=False)
-card = ui.card("Reading mode", width=340)
-card.body.innerText = "reading…"
+
+@start(interactive=False)  # informational card: the page must keep its clicks
+def main():
+    status(None)
 
 WORDS_PER_MINUTE = 220
 state = {"url": ""}
@@ -45,25 +54,25 @@ async def open_next(payload: dict) -> None:
     href = str(payload.get("href") or "")
     if not href:
         return
-    card.head.innerText = "Intercepted — Python took over"
-    card.body.innerText = f"link: {payload.get('text', '')[:60]}\n→ {href}\n\nfetching…"
+    ext_page.title.text = "Intercepted — Python took over"
+    ext_page.body.text = f"link: {payload.get('text', '')[:60]}\n→ {href}\n\nfetching…"
 
     try:
         html = await fetch_text(href)
     except Exception as e:  # noqa: BLE001
-        card.body.innerText = f"fetch failed: {type(e).__name__}"
+        ext_page.body.text = f"fetch failed: {type(e).__name__}"
         return
 
     # Crude extraction on purpose: this demo is about the click, not about parsing.
     import re as _re
 
-    title = (_re.search(r"<title[^>]*>(.*?)</title>", html, _re.S | _re.I) or [None, "(no title)"])[1]
-    paragraphs = _re.findall(r"<p[^>]*>(.*?)</p>", html, _re.S | _re.I)
+    title = (_re.search(r"<title[^>]*>(.*?)</title>", html, _re.DOTALL | _re.IGNORECASE) or [None, "(no title)"])[1]
+    paragraphs = _re.findall(r"<p[^>]*>(.*?)</p>", html, _re.DOTALL | _re.IGNORECASE)
     text = " ".join(_re.sub(r"<[^>]+>", "", p).strip() for p in paragraphs)
     words = len(text.split())
 
-    card.head.innerText = f"Intercepted — {words} words"
-    card.body.innerText = "\n".join([
+    ext_page.title.text = f"Intercepted — {words} words"
+    ext_page.body.text = "\n".join([
         f"page: {title.strip()[:70]}",
         f"url stayed: {state['url'][-24:]}",
         "",
@@ -86,10 +95,8 @@ async def build() -> None:
     # The visible change: clutter out, a Python-computed header in. Optional: a page
     # without an ad slot is not an error, and a demo that crashes on a variant teaches
     # the wrong lesson about page-shaped assumptions.
-    try:
+    with contextlib.suppress(Exception):  # a page without an ad slot is not an error
         await page.set_attr("#ad-slot", "hidden", "1")
-    except Exception:  # noqa: BLE001
-        pass
     await page.append_html("article", f"""
       <header id="pyodex-reading" data-pyodex-reading="1"
               style="border-left:3px solid #f43f5e;padding:10px 14px;margin:18px 0;
@@ -100,15 +107,13 @@ async def build() -> None:
       </header>""")
 
     # Persist that this page was read, so the count survives a reload.
-    try:
+    with contextlib.suppress(Exception):  # storage is a nicety, not the demo
         seen = (await chrome.local.get("pyodex.reading.seen")) or 0
         await chrome.local.set("pyodex.reading.seen", int(seen) + 1)
-    except Exception:  # noqa: BLE001
-        pass
 
-    ui.badge(f"{minutes} min", top=16, left=16)
-    card.head.innerText = f"Reading mode — {minutes} min"
-    card.body.innerText = "\n".join([
+    ext_page.badge.text = f"{minutes} min"
+    ext_page.title.text = f"Reading mode — {minutes} min"
+    ext_page.body.text = "\n".join([
         f"{words} words · {len(paragraphs)} paragraphs",
         f"{WORDS_PER_MINUTE} wpm → {minutes} min",
         f"url: {info['url'].rsplit('/', 2)[-2:][0]}/…",

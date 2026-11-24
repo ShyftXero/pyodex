@@ -21,7 +21,7 @@ from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .builder import build_extension, resolve_project
+from .builder import build_extension, read_page_body, resolve_project
 
 IWA_NOTES = """Isolated Web App (experimental)
 ==============================
@@ -131,8 +131,7 @@ def build_iwa(target: Path, out: Path | None = None, *, direct_sockets: bool = F
     # IWA entry point replaces the click-through overlay page.
     css_file = project / "overlay.css"
     css = cfg.overlay_css or (css_file.read_text() if css_file.exists() else "")
-    body_file = project / "overlay.body.html"
-    body = cfg.overlay_body or (body_file.read_text() if body_file.exists() else "")
+    body = read_page_body(project, cfg)
     (out / "index.html").write_text(_iwa_index(cfg.name, body, cfg.scripts))
     (out / "iwa.css").write_text(_iwa_css(css))
     (out / "iwa-icon.svg").write_text(

@@ -3,25 +3,16 @@
 What it shows: reading structured data out of the host page, doing real analysis in
 Python, and reporting findings with reasons rather than a red squiggle.
 
-pyodex features: Page.attr (bulk attribute read), Overlay.card, table-free rendering.
+pyodex features: main.html, ext_page, @handler, page.attr (bulk attribute read).
 The heuristic is deliberately small and explainable: a link is suspicious when its
 registrable domain is a near-miss of a protected brand (edit distance, digit
 substitutions) or uses a brand name in a subdomain.
 """
 
-import asyncio
-
-from pyodex_runtime import Overlay, Page, on, status
+from pyodex import ext_page, handler, page, status
 
 BRANDS = ("paypal", "google", "microsoft", "apple", "amazon", "github", "coinbase")
 LOOKALIKE_DIGITS = {"0": "o", "1": "l", "3": "e", "5": "s", "7": "t", "4": "a"}
-
-ui = Overlay()
-page = Page()
-card = ui.card("Demo 03 — link check")
-card.body.innerText = "Press Scan to check this page's links."
-btn = ui.button("Scan links", top=16, right=16, id="scan-btn")
-
 
 def edit_distance(a: str, b: str) -> int:
     if a == b:
@@ -64,7 +55,8 @@ def assess(url: str) -> str | None:
     return None
 
 
-async def scan(_event=None) -> None:
+@handler  # main.html: onclick="scan_links"
+async def scan_links():
     hrefs = await page.attr("a[href]", "href")
     findings = []
     for href in hrefs:
@@ -74,12 +66,8 @@ async def scan(_event=None) -> None:
         if why:
             findings.append(f"{host_of(str(href))}\n  {why}")
 
-    card.head.innerText = f"Demo 03 — {len(hrefs)} link(s), {len(findings)} suspicious"
-    card.body.innerText = "\n\n".join(findings) if findings else "No lookalike domains found."
-    ui.badge(f"{len(findings)} flagged", color="#b91c1c" if findings else "#15803d", top=16, left=16)
+    ext_page.title.text = f"Demo 03 — {len(hrefs)} link(s), {len(findings)} suspicious"
+    ext_page.body.text = "\n\n".join(findings) if findings else "No lookalike domains found."
+    ext_page.badge.text = f"{len(findings)} flagged"
+    ext_page.badge.classList.toggle("warn", bool(findings))
     status(None)
-
-
-@on(btn, "click")
-def clicked(_event):
-    asyncio.ensure_future(scan())

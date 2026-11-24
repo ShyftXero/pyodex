@@ -1,0 +1,12 @@
+<!-- Demo 01 — the page is the source of truth.
+
+     onclick holds a handler NAME, not code: MV3 blocks inline JavaScript, so the
+     build rewrites this into the canonical pyodex-<event> binding and the boot
+     binder attaches the listener. The name is checked against @handler at build time. -->
+<article class="card">
+  <h1>Demo 01 — minimal UI</h1>
+  <p id="badge" class="badge">0 clicks</p>
+  <p id="body">Python is running in this tab.<br>Click the button.</p>
+</article>
+
+<button id="demo-btn" onclick="clicked">Click me</button>

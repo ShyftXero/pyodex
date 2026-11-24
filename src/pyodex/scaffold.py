@@ -15,25 +15,36 @@ entry = "main.py"
 # assets = ["icon.png"]
 '''
 
-MAIN_PY = '''"""Entry point. Runs inside Pyodide in the extension overlay iframe."""
+MAIN_PY = '''"""Behavior only: main.html says what runs, this says what it does."""
 
-from pyodex import Overlay, on, start
+from pyodex import ext_page, handler, start, status
 
 
 @start
 def main():
-    ui = Overlay()
-    btn = ui.button("Hello from Python", top=16, left=16)
+    status(None)  # hide the boot chip
 
-    @on(btn, "click")
-    def clicked(_event):
-        btn.innerText = "Clicked!"
+
+@handler  # main.html: onclick="clicked"
+def clicked():
+    ext_page.greeting.text = "Clicked!"
 '''
 
-OVERLAY_CSS = """/* Styles for the overlay page. Overlay body is click-through unless an element sets pointer-events: auto. */
+OVERLAY_CSS = """/* Layout and appearance. The overlay body is click-through; the app's own
+   top-level blocks take the pointer, so the page underneath keeps working. */
+.card { position: fixed; top: 16px; left: 16px; padding: 12px 16px; border-radius: 10px;
+  background: #18181b; color: #f5f7fa; border: 2px solid #f43f5e;
+  font: 14px/1.45 system-ui, sans-serif; }
+#go { position: fixed; top: 16px; right: 16px; padding: 10px 16px; border-radius: 8px; }
 """
 
-OVERLAY_BODY = """<!-- Markup injected into the overlay <body>. Optional. -->
+OVERLAY_BODY = """<!-- main.html: the page names the handler; the build checks the name exists. -->
+<div class="card">
+  <strong>Hello from Python</strong>
+  <p id="greeting">Nothing clicked yet.</p>
+</div>
+
+<button id="go" onclick="clicked">Click me</button>
 """
 
 
@@ -68,7 +79,7 @@ def init_project(target: Path, name: str, matches: list[str] | None) -> None:
         "pyodex.toml": PYEXT_TOML.format(name=name, matches=m),
         "main.py": MAIN_PY,
         "overlay.css": OVERLAY_CSS,
-        "overlay.body.html": OVERLAY_BODY,
+        "main.html": OVERLAY_BODY,
     }
     for fn, content in files.items():
         p = target / fn

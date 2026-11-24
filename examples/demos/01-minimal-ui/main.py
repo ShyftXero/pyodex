@@ -1,26 +1,24 @@
 """Demo 01 — minimal UI.
 
-What it shows: the whole loop an extension needs — render, react, count.
-pyodex features: Overlay.card / badge / button, @on, and a dict-free event handler.
-Nothing here touches the host page: it is a self-contained overlay app.
+What it shows: the whole loop an extension needs — declare markup, handle an
+event, update what the user sees.
+pyodex features: main.html, ext_page (strict element access), @handler.
+Nothing here touches the host page: it is a self-contained app page.
 """
 
-from pyodex_runtime import Overlay, on, status
-
-ui = Overlay()
-card = ui.card("Demo 01 — minimal UI")
-badge = ui.badge("0 clicks")
-btn = ui.button("Click me", top=16, right=16, id="demo-btn")
-
-card.body.innerText = "Python is running in this tab.\nClick the button."
+from pyodex import ext_page, handler, start, status
 
 clicks = 0
 
 
-@on(btn, "click")
-def clicked(_event):
+@start  # called once, after the page and Python are ready
+def main():
+    status(None)  # hide the boot chip
+
+
+@handler  # main.html: onclick="clicked"
+def clicked():
     global clicks
     clicks += 1
-    badge.innerText = f"{clicks} click{'s' if clicks != 1 else ''}"
-    card.body.innerText = f"You clicked {clicks} time(s).\nStill Python, still in this tab."
-    status(None)
+    ext_page.badge.text = f"{clicks} click{'s' if clicks != 1 else ''}"
+    ext_page.body.text = f"You clicked {clicks} time(s).\nStill Python, still in this tab."

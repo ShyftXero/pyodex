@@ -1,0 +1,4 @@
+[extension]
+name = "L30 Authoring"
+matches = ["<all_urls>"]
+http = false

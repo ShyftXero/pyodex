@@ -4,45 +4,42 @@ What it shows: the piece that makes this feel like an extension rather than a sc
 — Python receiving platform events (`storage.onChanged`, `tabs.onUpdated`) instead of
 only calling APIs.
 
-pyodex features: `chrome.on(event, fn)`. Declaring the subscription at import time is
-what lets the build register the listener in the service worker; MV3 will not wake a
-worker for listeners added later.
+pyodex features: `chrome.on(event, fn)`, `@handler`, `ext_page`. Declaring the
+subscription at import time is what lets the build register the listener in the
+service worker; MV3 will not wake a worker for listeners added later.
 
 Fire one yourself: change any `chrome.storage` value (or open/close a tab) and watch
 the card.
 """
 
-import asyncio
 import json
 
-from pyodex_runtime import Overlay, chrome, on, status
+from pyodex import chrome, ext_page, handler, start, status
 
-ui = Overlay()
-card = ui.card("Demo 07 — event bridge")
-card.body.innerText = "waiting for events…"
-count = {"n": 0}
-btn = ui.button("Fire a storage event", top=16, right=16, id="fire-btn")
+count = 0
+
+
+@start
+def main():
+    status(None)
 
 
 @chrome.on("storage.onChanged")
 def storage_changed(args):
-    count["n"] += 1
+    global count
+    count += 1
     detail = json.dumps(args)[:160] if args else "{}"
-    card.head.innerText = f"Demo 07 — {count['n']} event(s)"
-    card.body.innerText = f"storage.onChanged\n{detail}"
-    ui.badge(f"{count['n']} events", top=16, left=16)
-    status(None)
+    ext_page.title.text = f"Demo 07 — {count} event(s)"
+    ext_page.body.text = f"storage.onChanged\n{detail}"
+    ext_page.badge.text = f"{count} events"
 
 
 @chrome.on("tabs.onUpdated")
 def tab_updated(args):
-    card.body.innerText = "tabs.onUpdated\n" + json.dumps(args)[:160]
+    ext_page.body.text = "tabs.onUpdated\n" + json.dumps(args)[:160]
 
 
-@on(btn, "click")
-def clicked(_event):
-    asyncio.ensure_future(trigger())
-
-
-async def trigger() -> None:
-    await chrome.local.set("demo07", str(count["n"]) + "-tick")
+@handler  # main.html: onclick="fire"
+async def fire():
+    # An async handler is awaited by pyodex; no ensure_future needed.
+    await chrome.local.set("demo07", str(count) + "-tick")

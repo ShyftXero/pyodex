@@ -41,6 +41,103 @@ function showError(err, context = "error") {
   setStatus(`${context}: ${(err?.message || String(err)).split("\n")[0]}`, true);
 }
 
+// --------------------------------------------------------------------------- //
+// Markup bindings: <form pyodex-submit.prevent="connect">
+//
+// The attribute is data, never code. MV3 forbids inline JavaScript and refuses to
+// relax that policy, so an `onclick` can never run; but a name resolved against the
+// Python handler registry can. Modifiers are the vocabulary Alpine and Livewire
+// already use (.prevent .stop .once .self .window) so there is nothing new to learn.
+// --------------------------------------------------------------------------- //
+const MODIFIERS = new Set(["prevent", "stop", "once", "self", "window"]);
+
+function markupBindings(el) {
+  const found = [];
+  for (const attr of Array.from(el.attributes)) {
+    if (!attr.name.startsWith("pyodex-")) continue;
+    const [event, ...mods] = attr.name.slice("pyodex-".length).split(".");
+    const name = (attr.value || "").trim();
+    if (event && name) found.push({ event, mods, name });
+  }
+  return found;
+}
+
+async function bindMarkup(pyodide) {
+  let api, names;
+  try {
+    api = pyodide.globals.get("sys").modules.get("pyodex");
+    if (!api || !api._dispatch) return;
+    names = new Set(JSON.parse(api._handler_names()));
+  } catch (err) {
+    console.warn("[pyodex] markup bindings skipped:", err);
+    return;
+  }
+  const dispatch = api._dispatch;
+  const bound = new WeakSet();
+
+  const bindOne = (el) => {
+    if (bound.has(el)) return;
+    bound.add(el);
+    for (const { event, mods, name } of markupBindings(el)) {
+      const flags = new Set(mods);
+      for (const flag of flags) {
+        if (!MODIFIERS.has(flag)) console.warn(`[pyodex] unknown modifier .${flag} on ${event}`);
+      }
+      // The build checks this too; the fallback covers markup rendered at runtime.
+      if (!names.has(name)) {
+        console.warn(`[pyodex] no handler named "${name}" for ${event} — declare @handler in Python`);
+        continue;
+      }
+      const listener = (e) => {
+        if (flags.has("self") && e.target !== el) return;
+        if (flags.has("prevent")) e.preventDefault();
+        if (flags.has("stop")) e.stopPropagation();
+        dispatch(name, e);
+      };
+      (flags.has("window") ? window : el).addEventListener(event, listener, {
+        once: flags.has("once"),
+      });
+    }
+  };
+
+  const scan = (root) => {
+    if (!root || root.nodeType !== 1) return;
+    bindOne(root);
+    for (const el of root.querySelectorAll("*")) bindOne(el);
+  };
+
+  scan(document.body);
+  // Markup a plugin renders later takes the same path.
+  new MutationObserver((records) => {
+    for (const record of records) for (const node of record.addedNodes) scan(node);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+// MutationObserver fires as a microtask. If that microtask runs while Python is
+// executing, calling back into Python re-enters the interpreter and stalls boot.
+// Deferring to a timer moves the call to a point where Python is idle.
+window.pyodexDefer = (fn) => {
+  let batch = [];
+  let queued = false;
+  return (records) => {
+    // MutationObserver empties its own queue before calling us, so the records
+    // have to be carried across the timer by hand.
+    if (records && records.length) for (const record of records) batch.push(record);
+    if (queued) return;
+    queued = true;
+    setTimeout(() => {
+      const deliver = batch;
+      batch = [];
+      queued = false;
+      try {
+        fn(deliver);
+      } catch (err) {
+        console.error("[pyodex] deferred callback failed:", err);
+      }
+    }, 0);
+  };
+};
+
 const extensionRuntime = globalThis.chrome?.runtime;
 const assetURL = (rel) => new URL(rel, import.meta.url).href;
 const bundledAssets = new Set({{BUNDLED_ASSETS}});
@@ -220,6 +317,11 @@ _pyodex_api = _pyodex_sys.modules.get("pyodex")
 if _pyodex_api is not None:
     await _pyodex_api._run_start()
 `);
+
+  await bindMarkup(pyodide);
+  // Readiness, for tooling and tests: Python is loaded, handlers are bound. Static
+  // markup can exist long before this, so "the page has elements" proves nothing.
+  document.documentElement.dataset.pyodexReady = "1";
 
   // Page declarations need the extension's content-script bridge. An IWA
   // runs standalone, with no host tab or extension runtime.

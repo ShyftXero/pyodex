@@ -48,3 +48,6 @@
   padding: 10px 16px; border-top: 1px solid #27272a; color: #71717a;
   font: 11px/1.4 ui-monospace, monospace; display: flex; justify-content: space-between;
 }
+/* The shell used to be positioned inline by ui.panel(); position is layout, so it
+   belongs here with the rest of the geometry. */
+.px-shell { position: fixed; top: 16px; left: 16px; z-index: 10; }

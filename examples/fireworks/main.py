@@ -8,11 +8,9 @@ Demonstrates:
 
 import asyncio
 
-from pyodex_runtime import Overlay, TcpSocket, document, jsobj, on, status, vendored
+from pyodex import TcpSocket, ext_page, handler, jsobj, status, vendored
 
-ui = Overlay()
-container = document.getElementById("fireworks-container")
-btn = ui.button("Launch Fireworks 🎇", top=16, left=16, id="py-fireworks-btn")
+container = ext_page.get("#fireworks-container").unwrap()
 
 config = jsobj({
     "autoresize": True,
@@ -35,14 +33,14 @@ def set_running(value: bool) -> None:
     running = value
     if running:
         fireworks.start()
-        btn.innerText = "Stop Fireworks 🎆"
+        ext_page.launch_btn.text = "Stop Fireworks 🎆"
     else:
         fireworks.stop()
-        btn.innerText = "Launch Fireworks 🎇"
+        ext_page.launch_btn.text = "Launch Fireworks 🎇"
 
 
-@on(btn, "click")
-def toggle(_event):
+@handler  # main.html: onclick="toggle"
+def toggle():
     set_running(not running)
 
 

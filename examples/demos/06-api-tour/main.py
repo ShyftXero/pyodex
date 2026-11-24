@@ -6,21 +6,14 @@ DOM surface (element handles, values, text, clicks) — with every call's result
 printed so you can see the real values rather than a claim.
 
 pyodex features: `chrome.*` namespaces, `page[...]` element handles, `wait_for`,
-`set_attr`, `Overlay.card` / `badge`.
+`set_attr`, `main.html` + `ext_page` + `@handler`.
 """
 
-import asyncio
-
-from pyodex_runtime import Overlay, Page, chrome, on, status
-
-ui = Overlay()
-page = Page()
-card = ui.card("Demo 06 — API tour", width=340)
-card.body.innerText = "Press Run to exercise chrome.* and the DOM."
-btn = ui.button("Run tour", top=16, right=16, id="tour-btn")
+from pyodex import chrome, ext_page, handler, page, status
 
 
-async def tour(_event=None) -> None:
+@handler  # main.html: onclick="tour"
+async def tour():
     lines: list[str] = []
     ok = 0
 
@@ -72,12 +65,8 @@ async def tour(_event=None) -> None:
         await page.set_attr("body", "data-tour", "ran")
         record("dom set_attr", "body[data-tour]=ran")
 
-    card.head.innerText = f"Demo 06 — {ok} call(s) exercised"
-    card.body.innerText = "\n".join(lines)
-    ui.badge(f"{ok} ok", color="#15803d", top=16, left=16)
+    ext_page.title.text = f"Demo 06 — {ok} call(s) exercised"
+    ext_page.body.text = "\n".join(lines)
+    ext_page.badge.text = f"{ok} ok"
+    ext_page.badge.classList.add("ok")
     status(None)
-
-
-@on(btn, "click")
-def clicked(_event):
-    asyncio.ensure_future(tour())

@@ -420,6 +420,8 @@ async def dispatch() -> dict:
         page.subscribe(selector or "*", [event], throttle_ms=50, prevent_default=prevent_default)
 
         def handler(payload: Any, fns: list[Callable] = fns) -> None:
+            if isinstance(payload, dict) and "binding" in payload:
+                return  # routed by binding id, not by selector group
             for f in fns:
                 _invoke(f, payload)
 
@@ -861,6 +863,18 @@ class Page:
         browser acts synchronously and Python does not.
         """
         self._send("page.events", {"selector": selector,
+                                   "events": events or ["click"],
+                                   "throttle_ms": throttle_ms,
+                                   "prevent_default": bool(prevent_default)})
+
+    def subscribe_match(self, binding: int, match: dict, events: list[str], *,
+                        prevent_default: bool = False, throttle_ms: int = 50) -> None:
+        """Bind by locator (`role`/`name`/`text`/`testid`/`any_of`) instead of CSS.
+
+        The content script resolves the locator at dispatch time, so it survives a
+        re-render and reports which binding matched.
+        """
+        self._send("page.events", {"binding": int(binding), "match": match,
                                    "events": events or ["click"],
                                    "throttle_ms": throttle_ms,
                                    "prevent_default": bool(prevent_default)})
