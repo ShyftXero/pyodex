@@ -746,13 +746,13 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         app.mkdir()
         _copy(project / cfg.entry, app / "main.py")
         (app / "files.json").write_text(json.dumps(["main.py"]))
-        resources = ["bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
-        _emit_overlay_page(out, project, cfg, resources, scripts="")
-        _emit_injector(out, cfg, resources)
-        _emit_cache_surface(out, cfg, resources)
-        _emit_worker(out, cfg, project, resources)
-        _emit_relay(out, cfg, resources)
-        _finish(out, project, cfg, resources)
+        mp_resources = ["bootstrap.js", "pyodex_mp.py", "app/*", "micropython/*"]
+        _emit_overlay_page(out, project, cfg, mp_resources, scripts="")
+        _emit_injector(out, cfg, mp_resources)
+        _emit_cache_surface(out, cfg, mp_resources)
+        _emit_worker(out, cfg, project, mp_resources)
+        _emit_relay(out, cfg, mp_resources)
+        _finish(out, project, cfg, mp_resources)
         print(f"built micropython tier ({cfg.slug})")
 
     def _tier_build(runtime: str, dist_dir: str, files: tuple[str, ...], shim: str,
@@ -771,13 +771,13 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         app.mkdir()
         _copy(project / cfg.entry, app / "main.py")
         (app / "files.json").write_text(json.dumps(["main.py"]))
-        resources = ["bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
-        _emit_overlay_page(out, project, cfg, resources, page=page, scripts="")
-        _emit_injector(out, cfg, resources, page=page)
-        _emit_cache_surface(out, cfg, resources)
-        _emit_worker(out, cfg, project, resources)
-        _emit_relay(out, cfg, resources)
-        _finish(out, project, cfg, resources)
+        tier_resources = ["bootstrap.js", shim, "app/*", f"{dist_dir}/*"]
+        _emit_overlay_page(out, project, cfg, tier_resources, page=page, scripts="")
+        _emit_injector(out, cfg, tier_resources, page=page)
+        _emit_cache_surface(out, cfg, tier_resources)
+        _emit_worker(out, cfg, project, tier_resources)
+        _emit_relay(out, cfg, tier_resources)
+        _finish(out, project, cfg, tier_resources)
         print(f"built {runtime} tier ({cfg.slug})")
 
     if cfg.runtime == "rustpython":

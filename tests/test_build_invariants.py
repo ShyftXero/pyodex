@@ -61,7 +61,7 @@ def test_each_build_path_calls_the_single_exit():
         # up to the next top-level def, or the end
         match = re.search(r"\ndef [a-z_]+\(|^    def _tier_build\(", source[start + 1:], re.MULTILINE)
         end = start + 1 + match.start() if match else len(source)
-        assert "_finish(out, project, cfg, resources)" in source[start:end], (
+        assert re.search(r"_finish\(out, project, cfg, \w*resources\)", source[start:end]), (
             f"{marker} does not finish through _finish()"
         )
 
