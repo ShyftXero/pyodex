@@ -238,7 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("dir")
     s.add_argument("--out")
     s.add_argument("--port", type=int, default=0, help="for dev: loopback port (default: random)")
-    s.add_argument("--direct-sockets", action="store_true", help="allow Direct Sockets in the IWA")
+    s.add_argument("--direct-sockets", action="store_true",
+                   help="SECURITY: grant the IWA Direct Sockets + local/loopback "
+                        "network access (raw TCP/UDP to localhost and your LAN "
+                        "from the web app). Dev-only; do not ship.")
     s.set_defaults(fn=_cmd_iwa)
 
     s = sub.add_parser("cache", help="inspect / prune the wheel store")
