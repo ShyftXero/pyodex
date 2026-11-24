@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "proxy"))
 
 from pyodex.builder import ExtConfig, resolve_project
-from pyodex.packages import link_cow, read_pep723, script_dependencies
+from pyodex.packages import Pin, ensure_in_store, link_cow, read_pep723, script_dependencies
 from pyodex.pyodide_caps import diff, format_diff
 from python_websocket_proxy import AllowList, Proxy
 
@@ -57,6 +57,40 @@ def test_resolve_project_missing(tmp_path):
 
 def test_slug():
     assert ExtConfig(name="  Héllo  World!! ").slug == "h-llo-world"
+
+
+def test_cdn_wheel_without_sha_fails_closed(tmp_path, monkeypatch):
+    """A Pyodide-CDN lock entry with no sha256 must be rejected, never accepted
+    unverified (would otherwise skip the digest check and land an unchecked wheel)."""
+    monkeypatch.setenv("PYODEX_CACHE", str(tmp_path / "cache"))
+    pin = Pin("foo", "1.0")
+    lock = {"packages": {"foo": {"name": "foo", "version": "1.0", "file_name": "foo-1.0-py3-none-any.whl"}}}
+    with pytest.raises(RuntimeError, match="unverified CDN wheel"):
+        ensure_in_store(pin, pyodide_lock=lock, pyodide_version="0.99.0")
+
+
+def test_cdn_wheel_with_sha_takes_cdn_path(tmp_path, monkeypatch):
+    """With a sha256 present the CDN entry is used (no PyPI fallback), so the
+    fail-closed guard does not break the normal verified path."""
+    monkeypatch.setenv("PYODEX_CACHE", str(tmp_path / "cache"))
+    calls = {}
+
+    def fake_download(url, dest):
+        calls["url"] = url
+        dest.write_bytes(b"wheel-bytes")
+
+    import hashlib as _h
+
+    import pyodex.packages as pkg
+
+    monkeypatch.setattr(pkg, "_download", fake_download)
+    sha = _h.sha256(b"wheel-bytes").hexdigest()
+    pin = Pin("foo", "1.0")
+    lock = {"packages": {"foo": {"name": "foo", "version": "1.0",
+                                  "file_name": "foo-1.0-py3-none-any.whl", "sha256": sha}}}
+    whl = ensure_in_store(pin, pyodide_lock=lock, pyodide_version="0.99.0")
+    assert whl.name == "foo-1.0-py3-none-any.whl"
+    assert "cdn.jsdelivr.net" in calls["url"]
 
 
 def test_link_cow_readonly(tmp_path):
