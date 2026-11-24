@@ -43,6 +43,16 @@ What this gives you
 * With --direct-sockets, the manifest opts in to Direct Sockets and local
   network access. Chrome still decides which capabilities are available.
 
+!!! SECURITY WARNING: --direct-sockets !!!
+------------------------------------------
+--direct-sockets grants this web app `direct-sockets`, `local-network`, and
+`loopback-network` permissions. That means it can open raw TCP/UDP connections
+to 127.0.0.1 and to any host on your local network -- a reach normal web pages
+never have. Treat the app's code as trusted: anything it (or a compromised
+dependency) runs can probe loopback services and your LAN. This is a developer
+convenience only -- do NOT enable it for apps you distribute or do not fully
+trust. Omit the flag unless you specifically need raw sockets.
+
 What this does NOT give you
 ---------------------------
 * Traffic inspection for other tabs (by design; IWAs are isolated).
