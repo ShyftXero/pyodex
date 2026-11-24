@@ -157,6 +157,54 @@ def _build(tmp_path, toml, entry="print('hi')\n"):
     return built, (built / "injector.js").read_text()
 
 
+def test_prepare_out_refuses_foreign_nonempty_dir(tmp_path, monkeypatch):
+    """--out at a non-empty dir pyodex did not create must not be wiped (#10)."""
+    import pyodex.builder as b
+
+    foreign = tmp_path / "important"
+    foreign.mkdir()
+    sentinel = foreign / "keep.txt"
+    sentinel.write_text("precious\n")
+
+    called = []
+    monkeypatch.setattr(b.shutil, "rmtree", lambda *a, **k: called.append(a))
+
+    with pytest.raises(FileExistsError):
+        b._prepare_out(foreign)
+
+    assert called == [], "rmtree must not run on a foreign non-empty dir"
+    assert sentinel.read_text() == "precious\n"
+
+
+def test_prepare_out_clears_empty_and_marked_dirs(tmp_path):
+    """Empty dirs and prior pyodex builds (marker present) are safe to clear."""
+    import pyodex.builder as b
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    b._prepare_out(empty)  # no raise
+    assert empty.is_dir()
+
+    owned = tmp_path / "owned"
+    owned.mkdir()
+    (owned / b.BUILD_MARKER).write_text("slug\n")
+    (owned / "old.js").write_text("stale\n")
+    b._prepare_out(owned)
+    assert owned.is_dir() and not (owned / "old.js").exists()
+
+
+def test_build_writes_marker_so_rebuild_is_allowed(tmp_path):
+    """A real build drops the marker; building into the same --out again succeeds."""
+    import pyodex.builder as b
+
+    out = tmp_path / "out"
+    (tmp_path / "pyodex.toml").write_text('[extension]\nname = "Rebuild"\n')
+    (tmp_path / "main.py").write_text("print('hi')\n")
+    b.build_extension(tmp_path, out)
+    assert (out / b.BUILD_MARKER).is_file()
+    b.build_extension(tmp_path, out)  # must not raise: marker proves ownership
+
+
 def test_boot_defaults_to_user(tmp_path):
     """Default: no interpreter until the user clicks the launcher."""
     _, js = _build(tmp_path, '[extension]\nname = "Lazy Ext"\n')
