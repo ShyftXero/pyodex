@@ -258,6 +258,14 @@ def ensure_in_store(pin: Pin, *, pyodide_lock: dict | None = None, pyodide_versi
         if meta and meta.get("version") == pin.version and meta["file_name"].endswith(".whl"):
             url = f"https://cdn.jsdelivr.net/pyodide/v{pyodide_version}/full/{meta['file_name']}"
             sha = meta.get("sha256")
+            if not sha:
+                # Fail closed: a Pyodide-CDN wheel with no digest in the lock
+                # cannot be verified, so never accept it (would skip the
+                # `if sha and ...` check below and land an unchecked wheel).
+                raise RuntimeError(
+                    f"{pin.name}=={pin.version}: pyodide-lock entry for "
+                    f"{meta['file_name']} has no sha256; refusing unverified CDN wheel"
+                )
     if not url:
         req = urllib.request.Request(PYPI_JSON.format(name=pin.name), headers={"User-Agent": "pyodex"})
         with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
