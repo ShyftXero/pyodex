@@ -15,6 +15,7 @@ Output (dist/<slug>/) is a flat unpacked extension ready for "Load unpacked".
 from __future__ import annotations
 
 import ast
+import html
 import json
 import re
 import shutil
@@ -86,7 +87,7 @@ def _needs_relay(cfg: ExtConfig) -> bool:
 def _app_ctx(cfg: ExtConfig, *, page: str = "overlay.html", scripts: str = "") -> dict:
     """Placeholders shared by injector.js, bg.js and the overlay page — one dictionary."""
     return {
-        "NAME": cfg.name, "SLUG": cfg.slug, "LABEL": json.dumps(cfg.name),
+        "NAME": html.escape(cfg.name), "SLUG": cfg.slug, "LABEL": json.dumps(cfg.name),
         "URL_FILTER": json.dumps(cfg.url_filter), "BOOT_MODE": json.dumps(cfg.boot),
         "IDLE_TIMEOUT_MS": str(int(cfg.idle_timeout) * 1000),
         "REAP_HIDDEN_MS": str(int(cfg.reap_hidden_after) * 1000),
@@ -150,7 +151,7 @@ def _emit_cache_surface(out: Path, cfg: ExtConfig, resources: list[str]) -> None
     if not cfg.cache:
         return
     for name in ("cache.js", "options.html", "options.js", "popup.html", "popup.js"):
-        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": html.escape(cfg.name)}))
         resources.append(name)
 
 
@@ -182,7 +183,7 @@ def _emit_engine_host(out: Path, cfg: ExtConfig, resources: list[str]) -> None:
     if cfg.engine == "shared":
         names += ("engine.html", "engine.js")
     for name in names:
-        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": cfg.name}))
+        (out / name).write_text(_render((TEMPLATES / name).read_text(), {"NAME": html.escape(cfg.name)}))
         resources.append(name)
 
 
@@ -927,11 +928,11 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
     _emit_cache_surface(out, cfg, resources)
     if python_popup:
         # popup.py wins over the static cache popup: same interpreter, own page.
-        (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
+        (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", html.escape(cfg.name)))
         if "popup.html" not in resources:
             resources.append("popup.html")
     if python_panel:
-        (out / "sidepanel.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
+        (out / "sidepanel.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", html.escape(cfg.name)))
         if "sidepanel.html" not in resources:
             resources.append("sidepanel.html")
     _emit_worker(out, cfg, project, resources)
