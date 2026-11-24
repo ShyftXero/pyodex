@@ -913,12 +913,6 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         _render((TEMPLATES / "bootstrap.js").read_text(), _app_ctx(cfg)))
     _emit_injector(out, cfg, resources)
 
-    if not cfg.version:
-        # datever, in the dotted form Chrome accepts (max 4 parts, <= 65535 each)
-        from .version import chrome_version
-        from .version import datever as _datever
-
-        cfg.version = chrome_version(_datever())
     if remote:
         # Pin the exact bytes we expect from the remote base. The lockfile does not
         # describe the core files, and a digest taken from our own verified copy is
