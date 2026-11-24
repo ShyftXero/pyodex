@@ -225,6 +225,10 @@ def _finish(out: Path, project: Path, cfg: ExtConfig, resources: list[str]) -> N
                          (project / "popup.py").is_file(), (project / "panel.py").is_file())
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
+    # 2b. Mark the directory as pyodex-owned so a later rebuild may clear it; see
+    #     _prepare_out, which refuses to rmtree a non-empty dir lacking this marker.
+    (out / BUILD_MARKER).write_text(cfg.slug + "\n")
+
     # 3. prove the manifest is not lying
     missing = sorted(n for n in _referenced_files(manifest) if not (out / n).exists())
     if missing:
@@ -353,6 +357,32 @@ def _declared_events(project: Path, cfg: ExtConfig) -> list[str]:
 
 TEMPLATES = Path(__file__).parent / "templates"
 RUNTIME = Path(__file__).parent / "runtime"
+
+# Dropped into every build output. Its presence is pyodex's proof that it owns a
+# directory and may wipe it on rebuild; without it we refuse to rmtree a
+# non-empty --out so `build x --out ~/important` cannot delete someone's data.
+BUILD_MARKER = ".pyodex-build"
+
+
+def _prepare_out(out: Path) -> None:
+    """Make `out` an empty directory, refusing to delete a dir pyodex did not create.
+
+    rmtree on a user-supplied --out is a foot-gun: `build x --out ~/dir` would wipe
+    that dir's contents. We only clear a directory that is empty or that carries our
+    BUILD_MARKER (i.e. a previous pyodex build). Anything else raises instead.
+    """
+    if out.exists():
+        if not out.is_dir():
+            raise NotADirectoryError(f"--out {out} exists and is not a directory")
+        entries = list(out.iterdir())
+        if entries and not (out / BUILD_MARKER).is_file():
+            raise FileExistsError(
+                f"refusing to overwrite {out}: it is not empty and was not created by "
+                f"pyodex (no {BUILD_MARKER} marker). Point --out at an empty or pyodex-"
+                f"built directory, or delete it yourself first."
+            )
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
 
 
 @dataclass
@@ -713,9 +743,7 @@ def _imports_any(project: Path, cfg: ExtConfig, modules: tuple[str, ...]) -> boo
 def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = False) -> Path:
     project, cfg = resolve_project(target)
     out = out or (project / "dist" / cfg.slug)
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    _prepare_out(out)
 
     # Stamp the datever before anything can return early: an empty "version" makes
     # the manifest invalid and Chrome refuses to load the extension silently.
