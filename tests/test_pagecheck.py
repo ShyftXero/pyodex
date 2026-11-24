@@ -47,6 +47,25 @@ def test_rewrite_maps_sugar_and_keeps_quotes():
     assert not warnings and not errors
 
 
+def test_rewrite_skips_raw_text_and_comments():
+    body = (
+        '<pre> onclick="x" </pre>'
+        '<code>onmouseover="y"</code>'
+        '<script>el.onclick="z"</script>'
+        '<!-- onclick="c" -->'
+        '<b onclick="go"></b>'
+    )
+    out, warnings, errors = rewrite(body)
+    assert not warnings and not errors
+    # Examples inside raw-text / comment regions survive byte-for-byte.
+    assert '<pre> onclick="x" </pre>' in out
+    assert '<code>onmouseover="y"</code>' in out
+    assert '<script>el.onclick="z"</script>' in out
+    assert '<!-- onclick="c" -->' in out
+    # A real attribute outside those regions is still rewritten.
+    assert '<b pyodex-click="go"></b>' in out
+
+
 def test_rewrite_reports_code_values():
     out, _warnings, errors = rewrite('<b onclick="alert(1)"></b>')
     assert "pyodex-click" not in out

@@ -40,6 +40,19 @@ _ATTRIBUTE = re.compile(
     r"""(?P<space>\s)(?P<name>on[a-zA-Z]+)(?P<eq>\s*=\s*)(?P<quote>["'])(?P<value>[^"']*)(?P=quote)"""
 )
 
+# Regions whose text is content, not markup: an `onclick="x"` inside them is an
+# example or a comment, not an attribute to rewrite. `script`/`style`/`textarea`
+# are raw-text/escapable raw-text per the HTML spec; `pre`/`code` are where
+# documentation shows a handler literally. Non-greedy to the first close so
+# adjacent blocks stay independent; an unclosed block is left to the live sub.
+_PROTECTED = re.compile(
+    r"""(?:
+        <!--.*?-->
+      | <(?P<tag>pre|code|script|style|textarea|title)\b[^>]*>.*?</(?P=tag)\s*>
+    )""",
+    re.VERBOSE | re.IGNORECASE | re.DOTALL,
+)
+
 # A rewritten attribute is still a name; these need a warning because the event
 # they imply is not the one the author means.
 _WARN_ON = {
@@ -145,7 +158,16 @@ def rewrite(body: str) -> tuple[str, list[str], list[str]]:
         quote = match.group("quote")
         return f'{match.group("space")}{CANONICAL}{name[2:]}{suffix}={quote}{handler}{quote}'
 
-    rewritten = _ATTRIBUTE.sub(replace, body)
+    # Rewrite only the text outside raw-text/comment regions; the regions
+    # themselves are copied through byte-for-byte.
+    out: list[str] = []
+    last = 0
+    for region in _PROTECTED.finditer(body):
+        out.append(_ATTRIBUTE.sub(replace, body[last:region.start()]))
+        out.append(region.group(0))
+        last = region.end()
+    out.append(_ATTRIBUTE.sub(replace, body[last:]))
+    rewritten = "".join(out)
     return rewritten, warnings, errors
 
 
