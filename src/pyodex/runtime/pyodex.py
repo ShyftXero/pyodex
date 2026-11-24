@@ -295,6 +295,10 @@ class Node:
 class _ExtensionPage:
     """The page pyodex ships: `main.html`, same document as this Python."""
 
+    # pagecheck.ext_page_refs reads the *public* method names of this class to
+    # tell an API call (`ext_page.get(...)`) from an element-id lookup
+    # (`ext_page.host` -> `#host`, via __getattr__). Keep new query methods
+    # public; a leading underscore hides them from the build-time checker.
     def get(self, selector: str) -> Node:
         """One required element. Raises, naming the DOM it searched."""
         node = _query_one(selector)

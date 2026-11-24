@@ -195,10 +195,46 @@ def handlers_in(sources: list[tuple[Path, str]]) -> dict[str, int]:
     return found
 
 
+# The runtime object `ext_page` is `_ExtensionPage` in
+# runtime/pyodex.py; every public method there is an API call, and
+# `__getattr__` turns any *other* name into an element-id lookup. We read that
+# surface straight from the source instead of hardcoding it, so adding a method
+# on the runtime side cannot silently turn into a "missing id" here.
+# Keep the paired note on `_ExtensionPage` if this coupling ever changes.
+_RUNTIME_SRC = Path(__file__).with_name("runtime") / "pyodex.py"
+_DEFAULT_EXT_PAGE_METHODS = frozenset({"get", "get_all", "maybe"})
+
+
+def _ext_page_methods() -> frozenset[str]:
+    """Public method names on the runtime `_ExtensionPage`, read from source.
+
+    AST, not import: the runtime module needs a live JS bridge to load, which
+    the build host does not have. A fallback keeps the checker working if the
+    source ever moves out of reach.
+    """
+    try:
+        tree = ast.parse(_RUNTIME_SRC.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return _DEFAULT_EXT_PAGE_METHODS
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "_ExtensionPage":
+            names = {
+                child.name
+                for child in node.body
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and not child.name.startswith("_")
+            }
+            if names:
+                return frozenset(names)
+    return _DEFAULT_EXT_PAGE_METHODS
+
+
 def ext_page_refs(sources: list[tuple[Path, str]]) -> list[tuple[str, Path, int]]:
     """Selectors and attribute names the Python asks `ext_page` for."""
-    methods = {"get", "get_all", "maybe"}
-    known = methods | {"own"}
+    # A public method is an API call; anything else is an element id via
+    # `_ExtensionPage.__getattr__`. Both come from the runtime class itself.
+    methods = _ext_page_methods()
+    known = methods
     refs: list[tuple[str, Path, int]] = []
     for path, src in sources:
         try:
