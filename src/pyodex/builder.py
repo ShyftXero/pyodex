@@ -14,6 +14,7 @@ Output (dist/<slug>/) is a flat unpacked extension ready for "Load unpacked".
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
@@ -280,17 +281,40 @@ def _derived_permissions(project: Path, cfg: ExtConfig) -> list[str]:
     return found
 
 
-def _uses_dom(project: Path, cfg: ExtConfig) -> bool:
-    """Does the app touch the page or draw UI? Decides whether it needs a page host."""
-    import ast
+_TREE_CACHE: dict[tuple[str, float], ast.AST] = {}
 
-    DOM_NAMES = {"Overlay", "Page", "page", "ext_page", "document", "pyodex_mp"}
+
+def _source_trees(project: Path, cfg: ExtConfig) -> list[tuple[Path, ast.AST]]:
+    """Parse the entry + python_files once and hand the same trees to every scan.
+
+    _declared_events, _uses_dom, _guard_rustpython_imports and _imports_any each used
+    to re-read and re-parse these files — four AST walks per build. Parse per
+    (path, mtime) and reuse, so adding a fifth scan is one more walk, not one more parse.
+    Unreadable or unparseable files are skipped, matching the old per-scan behaviour.
+    """
     files = [project / cfg.entry] + [project / f for f in cfg.python_files]
+    trees: list[tuple[Path, ast.AST]] = []
     for f in files:
         try:
-            tree = ast.parse(f.read_text())
-        except (OSError, SyntaxError):
+            source = f.read_text()
+            key = (str(f), f.stat().st_mtime)
+        except OSError:
             continue
+        tree = _TREE_CACHE.get(key)
+        if tree is None:
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            _TREE_CACHE[key] = tree
+        trees.append((f, tree))
+    return trees
+
+
+def _uses_dom(project: Path, cfg: ExtConfig) -> bool:
+    """Does the app touch the page or draw UI? Decides whether it needs a page host."""
+    DOM_NAMES = {"Overlay", "Page", "page", "ext_page", "document", "pyodex_mp"}
+    for _f, tree in _source_trees(project, cfg):
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and node.id in DOM_NAMES:
                 return True
@@ -328,15 +352,8 @@ def _declared_events(project: Path, cfg: ExtConfig) -> list[str]:
     MV3 only delivers events to listeners registered at top level, so this has to
     happen at build time rather than when Python asks.
     """
-    import ast
-
     found: list[str] = []
-    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
-    for f in files:
-        try:
-            tree = ast.parse(f.read_text())
-        except (OSError, SyntaxError):
-            continue
+    for _f, tree in _source_trees(project, cfg):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -621,14 +638,7 @@ def _guard_rustpython_imports(project: Path, cfg: ExtConfig) -> None:
     Discovering `import js` at runtime as a bare ModuleNotFoundError is technically
     loud but useless: the message says nothing about the tier or what to use instead.
     """
-    import ast
-
-    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
-    for f in files:
-        try:
-            tree = ast.parse(f.read_text())
-        except (OSError, SyntaxError):
-            continue
+    for f, tree in _source_trees(project, cfg):
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -692,14 +702,7 @@ def _plan_runtime(cfg: ExtConfig, requirements: list[str], project: Path) -> Tie
 
 def _imports_any(project: Path, cfg: ExtConfig, modules: tuple[str, ...]) -> bool:
     """Cheap AST scan for imports that force a capability."""
-    import ast
-
-    files = [project / cfg.entry] + [project / f for f in cfg.python_files]
-    for f in files:
-        try:
-            tree = ast.parse(f.read_text())
-        except (OSError, SyntaxError):
-            continue
+    for _f, tree in _source_trees(project, cfg):
         for node in ast.walk(tree):
             if isinstance(node, ast.Import) and any(
                     a.name.split(".")[0] in modules for a in node.names):
