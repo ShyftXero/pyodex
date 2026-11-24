@@ -153,11 +153,29 @@ def _emit_cache_surface(out: Path, cfg: ExtConfig, resources: list[str]) -> None
         resources.append(name)
 
 
-def _emit_worker(out: Path, cfg: ExtConfig, project: Path, resources: list[str]) -> None:
+def _lock_digests(cfg: ExtConfig, pyodide_lock: dict | None) -> dict:
+    """The trusted root for bg.js: the pinned version's lockfile digests, baked in.
+
+    bg.js must never fetch pyodide-lock.json live (that lockfile authorises every
+    other blob's digest, so fetching it unverified leaves the chain rootless). We
+    only know a trusted root for the version this build pins; any other version
+    gets no digests and bg.js falls through to the network.
+    """
+    if not pyodide_lock:
+        return {"version": None, "files": {}}
+    files = {p["file_name"]: p["sha256"]
+             for p in (pyodide_lock.get("packages") or {}).values()
+             if p.get("file_name") and p.get("sha256")}
+    return {"version": cfg.pyodide_version, "files": files}
+
+
+def _emit_worker(out: Path, cfg: ExtConfig, project: Path, resources: list[str],
+                 pyodide_lock: dict | None = None) -> None:
     """bg.js: the event bridge and the runtime-blob cache relay."""
     if not _needs_bg(cfg):
         return
-    ctx = {**_app_ctx(cfg), "EVENTS": json.dumps(_declared_events(project, cfg))}
+    ctx = {**_app_ctx(cfg), "EVENTS": json.dumps(_declared_events(project, cfg)),
+           "LOCK_DIGESTS": json.dumps(_lock_digests(cfg, pyodide_lock))}
     (out / "bg.js").write_text(_render((TEMPLATES / "bg.js").read_text(), ctx))
     resources.append("bg.js")
 
@@ -903,7 +921,7 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         (out / "sidepanel.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", cfg.name))
         if "sidepanel.html" not in resources:
             resources.append("sidepanel.html")
-    _emit_worker(out, cfg, project, resources)
+    _emit_worker(out, cfg, project, resources, pyodide_lock=pyodide_lock)
     _emit_engine_host(out, cfg, resources)
     _emit_relay(out, cfg, resources)
 
