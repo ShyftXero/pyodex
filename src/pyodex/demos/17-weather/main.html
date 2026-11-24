@@ -1,0 +1,39 @@
+<!-- Demo 17 — the markup is static; Python only sets data-state on #scene and
+     fills the three text lines. Every bit of motion is a CSS rule keyed off that
+     one attribute. onclick / onkeydown hold handler NAMES, not code. -->
+<section class="wx" id="card">
+  <div class="wx-scene" id="scene" data-state="loading">
+    <div class="sun"></div>
+    <div class="ray-ring"></div>
+    <div class="moon"></div>
+    <div class="stars">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="cloud cloud-a"></div>
+    <div class="cloud cloud-b"></div>
+    <div class="cloud cloud-c"></div>
+    <div class="rain">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="snow">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="bolt"></div>
+    <div class="haze"></div>
+    <div class="spinner"></div>
+  </div>
+
+  <div class="wx-info">
+    <div id="place" class="wx-place">Locating…</div>
+    <div id="temp" class="wx-temp">—</div>
+    <div id="desc" class="wx-desc">reading your weather</div>
+  </div>
+
+  <div class="wx-form">
+    <input id="ip" class="wx-ip" type="text" autocomplete="off"
+           placeholder="IP address (blank = you)" onkeydown="maybe_enter">
+    <button id="go" class="wx-go" onclick="lookup">Check</button>
+  </div>
+
+  <div id="note" class="wx-note"></div>
+</section>

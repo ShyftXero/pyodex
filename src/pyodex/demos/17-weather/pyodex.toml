@@ -1,0 +1,10 @@
+[extension]
+name = "Demo 17 Weather"
+version = ""
+description = "Animated weather for any IP — Python geolocates and fetches, CSS does the sun, rain, and snow. No JavaScript."
+matches = ["<all_urls>"]
+boot = "user"
+# fetch_json uses pyodide.http.pyfetch, so no requests wheels are needed.
+http = false
+# Cross-origin GETs to the geolocation + weather APIs from the extension page.
+host_permissions = ["https://ipwho.is/*", "https://api.open-meteo.com/*"]
