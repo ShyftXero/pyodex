@@ -509,3 +509,74 @@ def test_rustpython_guard_allows_the_shim(tmp_path):
     (tmp_path / "main.py").write_text("import pyodex_rp as ui\nui.status('ok')\n")
     built = build_extension(tmp_path, tmp_path / "out")
     assert (built / "rustpython" / "rustpython_wasm.js").exists()
+
+
+def test_download_is_atomic_on_interrupt(tmp_path):
+    """An interrupted _download must leave no file at the final path and clean up
+    its .partial, so a later `if not dest.exists()` check re-downloads instead of
+    treating a truncated file as complete."""
+    import io
+
+    from pyodex import deps
+
+    dest = tmp_path / "micropython.wasm"
+
+    class _Interrupting(io.BytesIO):
+        def read(self, n=-1):  # noqa: ARG002
+            raise KeyboardInterrupt
+
+    class _Resp:
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self._body
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=120):  # noqa: ARG001
+        return _Resp(_Interrupting())
+
+    orig = deps.urllib.request.urlopen
+    deps.urllib.request.urlopen = fake_urlopen
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            deps._download("https://example/x", dest)
+    finally:
+        deps.urllib.request.urlopen = orig
+
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + ".partial").exists()
+
+
+def test_download_writes_final_path_on_success(tmp_path):
+    import io
+
+    from pyodex import deps
+
+    dest = tmp_path / "micropython.wasm"
+    payload = b"wasm-bytes"
+
+    class _Resp:
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self._body
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=120):  # noqa: ARG001
+        return _Resp(io.BytesIO(payload))
+
+    orig = deps.urllib.request.urlopen
+    deps.urllib.request.urlopen = fake_urlopen
+    try:
+        deps._download("https://example/x", dest)
+    finally:
+        deps.urllib.request.urlopen = orig
+
+    assert dest.read_bytes() == payload
+    assert not dest.with_name(dest.name + ".partial").exists()

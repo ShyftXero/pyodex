@@ -36,10 +36,19 @@ def cache_dir() -> Path:
 
 
 def _download(url: str, dest: Path) -> None:
+    # Download to a sibling .partial first, then atomically rename into place so an
+    # interrupted transfer (Ctrl-C, crash) never leaves a truncated file that later
+    # `if not dest.exists()` checks would treat as complete.
+    partial = dest.with_name(dest.name + ".partial")
     req = urllib.request.Request(url, headers={"User-Agent": "pyodex"})
-    with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as f:  # noqa: S310
-        while chunk := r.read(1 << 16):
-            f.write(chunk)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r, open(partial, "wb") as f:  # noqa: S310
+            while chunk := r.read(1 << 16):
+                f.write(chunk)
+        os.replace(partial, dest)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def ensure_pyodide(version: str = PYODIDE_VERSION, force: bool = False) -> Path:
