@@ -40,12 +40,18 @@
         return { ok: true };
       }
       case "set_html": {
+        // SECURITY: raw-HTML sink. `value` (from Python) is written verbatim into the
+        // host page via innerHTML, no sanitization. Trust boundary is the Python caller:
+        // untrusted data here is stored XSS on the host site. Safe path is `set_text`.
         const el = q(sel)[index];
         if (!el) throw new Error(`no element for ${sel}[${index}]`);
         el.innerHTML = String(value);
         return { ok: true };
       }
       case "append_html": {
+        // SECURITY: raw-HTML sink, stronger than set_html — it re-animates <script>
+        // (see below), so injected markup can execute. Same trust boundary as set_html:
+        // pass only app-authored HTML, never untrusted/page/network-derived strings.
         const el = q(sel)[index] || document.body;
         const tpl = document.createElement("template");
         tpl.innerHTML = String(value);

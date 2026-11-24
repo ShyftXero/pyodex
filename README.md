@@ -489,6 +489,16 @@ Everything an app needs comes from one module — you never import `pyodide`,
 `count()`, `set_value()`, `set_text()`, `set_html()`, `click()`, `scroll_to()`,
 `fill({selector: value})`, `info()`, `subscribe()`.
 
+> **Security — `set_html()` / `append_html()` are raw-HTML sinks.** Whatever
+> string you pass is written verbatim into the **host page's** DOM with no
+> sanitization. The trust boundary is your Python code: the content script
+> treats the value as page-authored markup. `append_html()` goes further and
+> re-creates `<script>` nodes so they execute in the page's world (under the
+> page's CSP). Passing network-, page-, or user-derived data into either is
+> stored XSS on the site your user is viewing. **Pass only HTML your app
+> authored; for anything dynamic use `set_text()`**, which escapes and cannot
+> execute markup.
+
 **Declaring intent**: `@on_load`, `@watch_for(sel)`, `@on_event(events.X)`,
 `@urlmatch([...])`, `@on_attach` (engine mode), `events`.
 

@@ -794,6 +794,18 @@ class Page:
         await self.dom("set_text", sel, value=value, index=index)
 
     async def set_html(self, sel: str, value: str, index: int = 0) -> None:
+        """Replace an element's content with raw HTML (`innerHTML`).
+
+        SECURITY — raw-HTML sink, no sanitization. `value` is written verbatim
+        into the *host page's* DOM. The trust boundary is the caller: anything
+        you pass is trusted as page code. Passing network-, page-, or
+        user-derived strings here is stored XSS on the site the user is viewing.
+        Markup that runs on insert (`<img onerror>`, `<svg onload>`, etc.) fires
+        in the page's world under the page's CSP.
+
+        Pass only HTML your app authored. For untrusted or dynamic data use
+        `set_text()`, which escapes and cannot execute markup.
+        """
         await self.dom("set_html", sel, value=value, index=index)
 
     async def append_html(self, sel: str, value: str, index: int = 0) -> None:
@@ -801,6 +813,14 @@ class Page:
 
         `set_html` is destructive; a demo that wants a canvas next to the page it is
         analysing needs this instead.
+
+        SECURITY — raw-HTML sink, *stronger* than `set_html`: the content script
+        re-creates any `<script>` nodes in `value` so they actually execute in
+        the host page's world (plain `innerHTML` would not run them). Same trust
+        boundary applies and then some — never pass untrusted data here. The
+        demos that use this (13-doomlike, 15-reading-mode) inject only
+        app-authored markup plus an extension-packaged runner URL. For dynamic
+        data use `set_text()`.
         """
         await self.dom("append_html", sel, value=value, index=index)
 
