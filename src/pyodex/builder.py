@@ -803,6 +803,12 @@ def build_extension(target: Path, out: Path | None = None, *, allow_bad: bool = 
         _emit_cache_surface(out, cfg, mp_resources)
         _emit_worker(out, cfg, project, mp_resources)
         _emit_relay(out, cfg, mp_resources)
+        # python_popup is defined in the outer scope (build_extension)
+        nonlocal_python_popup = (project / "popup.py").is_file()
+        if nonlocal_python_popup:
+            (out / "popup.html").write_text((TEMPLATES / "popup_py.html").read_text().replace("{{NAME}}", html.escape(cfg.name)))
+            if "popup.html" not in mp_resources:
+                mp_resources.append("popup.html")
         _finish(out, project, cfg, mp_resources)
         print(f"built micropython tier ({cfg.slug})")
 

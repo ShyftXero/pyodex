@@ -2,7 +2,8 @@
 name = "Demo 17 MicroPython Weather"
 version = ""
 description = "Animated weather for any IP on MicroPython — tiny runtime, no pip."
-matches = []
+matches = ["<all_urls>"]
+entry = "popup.py"
 boot = "user"
 http = false
 cache = false

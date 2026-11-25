@@ -26,13 +26,11 @@ class UiTourPage(Page):
 
     def populate(self):
         with t.div(classes="px-shell w-96 bg-gray-900 text-white border border-gray-700 rounded-xl overflow-hidden"):
-            # Head
             with t.div(classes="px-head flex items-center gap-4 p-4"):
                 t.span(classes="px-dot w-2 h-2 rounded-full bg-pink-500")
                 t.span("pyodex", classes="px-title font-bold")
                 t.span("ui tour", classes="px-pill text-xs font-bold tracking-wider text-pink-300 bg-pink-500/10 border border-pink-500/35 rounded-full px-2 py-1 ml-auto")
 
-            # Menu
             with t.div(classes="px-menu border-t border-gray-700"):
                 for i, item in enumerate(MENU):
                     with t.div(
@@ -45,7 +43,6 @@ class UiTourPage(Page):
                         t.span(item)
                         t.span(["⌘K", "⌘R", "⌘⇧4", "⌘,"][i], classes="px-k text-xs font-bold text-gray-500 border border-gray-600 rounded px-1 ml-auto")
 
-            # Body
             with t.div(classes="px-body p-4 gap-4"):
                 t.input(
                     placeholder="Filter…",
@@ -56,7 +53,6 @@ class UiTourPage(Page):
                     t.button("Open", on_click=self.open_item, classes="px-btn px-btn--primary flex-1 py-2 rounded-lg border border-pink-500 bg-pink-500 text-black font-bold")
                     t.button("Dismiss", on_click=self.dismiss, classes="px-btn flex-1 py-2 rounded-lg border border-gray-600 bg-gray-800 hover:border-gray-500")
 
-            # Foot
             with t.div(classes="px-foot px-4 py-2 border-t border-gray-700 text-gray-500 text-xs font-mono flex justify-between"):
                 t.span(lambda: f"{len(self.state['query'])} chars")
                 t.span("python · dom")
