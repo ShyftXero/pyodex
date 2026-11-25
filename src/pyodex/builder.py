@@ -628,14 +628,15 @@ def _manifest(cfg: ExtConfig, resources: list[str], extra_perms: list[str] | Non
         "name": cfg.name,
         "version": cfg.version,
         "description": cfg.description,
-        "content_scripts": [
-            {"matches": cfg.matches, "js": ["injector.js"], "run_at": "document_idle"}
-        ],
-        "web_accessible_resources": [{"resources": sorted(set(resources)), "matches": cfg.matches}],
         "content_security_policy": {
             "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
         },
     }
+    if cfg.matches:
+        m["content_scripts"] = [
+            {"matches": cfg.matches, "js": ["injector.js"], "run_at": "document_idle"}
+        ]
+        m["web_accessible_resources"] = [{"resources": sorted(set(resources)), "matches": cfg.matches}]
     if cfg.host_permissions:
         m["host_permissions"] = cfg.host_permissions
     m["icons"] = {"128": cfg.icon or "icon-128.png"}

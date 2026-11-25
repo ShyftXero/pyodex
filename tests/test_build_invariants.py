@@ -48,9 +48,11 @@ def test_every_demo_builds_a_self_consistent_package(tmp_path: Path, demo: Path)
     missing = sorted(n for n in _referenced_files(manifest) if not (out / n).exists())
     assert not missing, f"{demo.name}: manifest names files the build did not emit: {missing}"
 
-    registered = _non_glob(manifest["web_accessible_resources"][0]["resources"])
-    absent = sorted(n for n in registered if not (out / n).exists())
-    assert not absent, f"{demo.name}: registered but absent: {absent}"
+    war = manifest.get("web_accessible_resources")
+    if war:
+        registered = _non_glob(war[0]["resources"])
+        absent = sorted(n for n in registered if not (out / n).exists())
+        assert not absent, f"{demo.name}: registered but absent: {absent}"
 
 
 def test_each_build_path_calls_the_single_exit():
