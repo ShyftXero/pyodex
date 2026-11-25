@@ -1,8 +1,0 @@
-[extension]
-name = "Demo 14 Instrumented"
-version = ""
-description = "Everything a wasm blob does, observed from Python: imports hosted in Python, every export call timed."
-matches = ["<all_urls>"]
-boot = "user"
-http = false
-assets = ["guest.wasm", "color.wasm"]

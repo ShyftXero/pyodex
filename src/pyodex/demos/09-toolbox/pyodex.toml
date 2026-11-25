@@ -1,7 +1,0 @@
-[extension]
-name = "Demo 09 Toolbox"
-version = ""
-description = "Cookies, screenshots, downloads, bookmarks and history from Python."
-matches = ["<all_urls>"]
-boot = "user"
-http = false

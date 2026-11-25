@@ -1,7 +1,0 @@
-[extension]
-name = "Demo 07 Event Bridge"
-version = ""
-description = "Listens to browser events from Python: chrome.on(...) with a live event log."
-matches = ["<all_urls>"]
-boot = "user"
-http = false

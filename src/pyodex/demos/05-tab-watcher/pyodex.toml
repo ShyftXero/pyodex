@@ -1,9 +1,0 @@
-[extension]
-name = "Demo 05 Tab Watcher"
-version = ""
-description = "Always-on watcher: one shared interpreter counts the tabs it sees, ~1 MB per tab."
-matches = ["<all_urls>"]
-boot = "auto"
-engine = "shared"
-ui = "engine"
-http = false

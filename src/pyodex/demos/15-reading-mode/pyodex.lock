@@ -1,7 +1,0 @@
-{
-  "hash": "503d8e4d4fa77ba4",
-  "python": "3.14",
-  "platform": "wasm32-pyodide2025",
-  "requirements": [],
-  "pins": []
-}

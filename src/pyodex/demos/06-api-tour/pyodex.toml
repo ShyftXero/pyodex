@@ -1,7 +1,0 @@
-[extension]
-name = "Demo 06 API Tour"
-version = ""
-description = "Exercises the chrome.* namespaces and the DOM surface, and reports what each returned."
-matches = ["<all_urls>"]
-boot = "user"
-http = false
