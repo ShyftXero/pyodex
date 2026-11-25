@@ -1,7 +1,17 @@
 {
-  "hash": "503d8e4d4fa77ba4",
+  "hash": "2130d2fb46207e34",
   "python": "3.14",
   "platform": "wasm32-pyodide2025",
-  "requirements": [],
-  "pins": []
+  "requirements": [
+    "puepy"
+  ],
+  "pins": [
+    {
+      "name": "puepy",
+      "version": "0.6.5",
+      "sha256": "d41e19193b39c01d4af87656bd3335bdcf23c48c4b6f79e0f3c50b6581e7f711",
+      "url": "https://files.pythonhosted.org/packages/75/9d/95bd54b735f887ba778b0ad0ebd8356df7791b2129c65c5a85f39892e521/puepy-0.6.5-py3-none-any.whl",
+      "file": "puepy-0.6.5-py3-none-any.whl"
+    }
+  ]
 }

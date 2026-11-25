@@ -1,24 +1,20 @@
-"""Demo 01 — minimal UI.
+"""Demo 01 — PuePy minimal UI."""
+from puepy import Application, Page, t
 
-What it shows: the whole loop an extension needs — declare markup, handle an
-event, update what the user sees.
-pyodex features: main.html, ext_page (strict element access), @handler.
-Nothing here touches the host page: it is a self-contained app page.
-"""
+class MinimalPage(Page):
+    def initial_state(self):
+        return {"clicks": 0}
 
-from pyodex import ext_page, handler, start, status
+    def clicked(self):
+        self.state["clicks"] += 1
 
-clicks = 0
+    def populate(self):
+        with t.div(classes="card p-4 w-64 bg-gray-900 text-white border border-pink-500 rounded-lg"):
+            t.label("Demo 01 — PuePy Minimal UI").classes("font-bold mb-4")
+            t.label(lambda: f"{self.state['clicks']} click{'s' if self.state['clicks'] != 1 else ''}").classes("badge text-pink-300 mb-2")
+            t.label(lambda: f"You clicked {self.state['clicks']} time(s).\nStill Python, still in this tab.").classes("mb-4")
+            t.button(lambda: f"Click me ({self.state['clicks']})", on_click=self.clicked).classes("w-full px-4 py-2 bg-gray-800 border border-pink-500 rounded hover:bg-gray-700")
 
-
-@start  # called once, after the page and Python are ready
-def main():
-    status(None)  # hide the boot chip
-
-
-@handler  # main.html: onclick="clicked"
-def clicked():
-    global clicks
-    clicks += 1
-    ext_page.badge.text = f"{clicks} click{'s' if clicks != 1 else ''}"
-    ext_page.body.text = f"You clicked {clicks} time(s).\nStill Python, still in this tab."
+app = Application()
+app.add_page(MinimalPage, "/")
+app.mount("#app")

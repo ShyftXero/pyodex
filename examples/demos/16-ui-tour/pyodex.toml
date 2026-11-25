@@ -1,7 +1,10 @@
 [extension]
-name = "Demo 16 Ui Tour"
+name = "Demo 16 PuePy"
 version = ""
-description = "The whole UI vocabulary in one screen: panel, menu, badge, input, buttons, and CSS for states."
-matches = ["<all_urls>"]
+description = "PuePy component vocabulary: panel, menu, input, buttons, reactive state. No JavaScript."
+matches = []
 boot = "user"
 http = false
+cache = false
+page_cache = false
+pyodide_packages = ["puepy"]

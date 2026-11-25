@@ -1,7 +1,10 @@
 [extension]
-name = "Demo 01 Minimal UI"
+name = "Demo 01 PuePy"
 version = ""
-description = "The smallest useful pyodex app: a card, a badge, a button, a click handler."
-matches = ["<all_urls>"]
+description = "Minimal PuePy app: a card, a badge, a button, reactive state. No JavaScript."
+matches = []
 boot = "user"
 http = false
+cache = false
+page_cache = false
+pyodide_packages = ["puepy"]
